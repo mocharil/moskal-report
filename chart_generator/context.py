@@ -149,10 +149,15 @@ def context(ALL_FILTER, SAVE_PATH):
 
     word = BQ.to_pull_data(query)
 
-    with open('utils/stopwords.txt') as f:
-        list_stopword = f.read().split()
+    list_stopword = []:
+    if os.path.isfile('utils/stopwords.txt'):
+         with open('utils/stopwords.txt') as f:
+              list_stopword = f.read().split()
+    else:
+         print('TIDAK ADA FILE STOPSOWRDS')
+         print(os.getcwd())
 
-    word = word[~word['word'].isin(list_stopword)]
+    word = word[~word['word'].isin(list_stopword)][:100]
 
     fig, ax = create_sentiment_wordcloud(word.to_dict(orient = 'records'), word = 'word')
     save_file = os.path.join(SAVE_PATH, 'word_sentiment_wordcloud.png')
