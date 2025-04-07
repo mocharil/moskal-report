@@ -48,8 +48,7 @@ def create_sentiment_wordcloud(data, width=600, height=350, background_color='wh
         min_font_size=10,
         max_font_size=80,
         font_step=1,
-        random_state=42,
-        font_path='arial.ttf'
+        random_state=42
     ).generate_from_frequencies(freq_dict)
     
     # Create figure and display the word cloud
