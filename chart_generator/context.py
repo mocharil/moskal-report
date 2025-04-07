@@ -149,7 +149,7 @@ def context(ALL_FILTER, SAVE_PATH):
 
     word = BQ.to_pull_data(query)
 
-    list_stopword = []:
+    list_stopword = []
     if os.path.isfile('utils/stopwords.txt'):
          with open('utils/stopwords.txt') as f:
               list_stopword = f.read().split()
