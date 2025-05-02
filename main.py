@@ -12,7 +12,7 @@ import subprocess
 from pathlib import Path
 import shutil
 from utils.send_email import send_email
-
+load_dotenv()
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -78,33 +78,7 @@ def generate_report(
 
     start_time = time.time()
     logger.info(f"Starting report generation for topic: {topic}")
-    
-    try:
-        # Validate email format if provided
-        if email_receiver and not re.match(r"[^@]+@[^@]+\.[^@]+", email_receiver):
-            raise HTTPException(status_code=400, detail="Invalid email format")
 
-        logger.info("Validating dates...")
-        try:
-            datetime.strptime(start_date, "%Y-%m-%d")
-            datetime.strptime(end_date, "%Y-%m-%d")
-        except ValueError:
-            raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD")
-
-        logger.info("Loading environment variables...")
-        load_dotenv()
-
-        # Validate required environment variables
-        required_env_vars = ["BQ_PROJECT_ID", "BQ_CREDS_LOCATION", "GCS_CREDS_LOCATION", "GCS_PROJECT_ID", "GCS_BUCKET_NAME"]
-        missing_vars = [var for var in required_env_vars if not os.getenv(var)]
-        if missing_vars:
-            raise ValueError(f"Missing required environment variables: {', '.join(missing_vars)}")
-
-        logger.info("Initializing BigQuery client...")
-    BQ = About_BQ(
-        project_id=os.getenv("BQ_PROJECT_ID"),
-        credentials_loc=os.getenv("BQ_CREDS_LOCATION")
-    )
 
     logger.info("Calculating date ranges...")
     diff_date = range_date_count(start_date, end_date)
