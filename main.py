@@ -218,6 +218,7 @@ def process_report_generation(
             "keywords": KEYWORDS,
             "email_receiver": email_receiver,
             "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "summary": summary or "Summary not available"
         }
 
         es.index(index="moskal-reports", document=report_data)
@@ -341,10 +342,8 @@ def get_user_reports(email: str):
                         "must": [
                             {"match": {"email_receiver.keyword": email}},
                             {"bool": {
-                                "should": [
-                                    {"match": {"status": "pending"}},
-                                    {"match": {"status": "processing"}},
-                                    {"match": {"status": "failed"}}
+                                "must_not": [
+                                    {"match": {"status": "completed"}}
                                 ]
                             }}
                         ]
@@ -365,7 +364,8 @@ def get_user_reports(email: str):
                 "url": report["public_url"],
                 "created_at": report["created_at"],
                 "status": "completed",
-                "keywords":report["keywords"]
+                "keywords": report["keywords"],
+                "summary": report.get("summary", "Summary not available")
             })
 
         # Process in-progress reports
@@ -380,7 +380,8 @@ def get_user_reports(email: str):
                 "status": report["status"],
                 "progress": report.get("progress", 0),
                 "job_id": report["id"],
-                "keywords":report["sub_keyword"].split(',')
+                "keywords":report["sub_keyword"].split(','),
+                "summary": report.get("summary", "Summary not available")
             })
 
         # Combine all reports
