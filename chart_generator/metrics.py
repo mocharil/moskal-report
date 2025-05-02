@@ -75,9 +75,43 @@ def generate_mentions_chart(title,data, current_mentions, previous_mentions, men
     x = np.arange(len(dates))
     y = np.array(values)
 
-    # Smoothing using B-spline
+    # Smoothing using B-spline with adaptive degree
     x_smooth = np.linspace(x.min(), x.max(), 300)
-    spline = make_interp_spline(x, y, k=3)
+    
+    # Choose spline degree based on number of points
+    if len(x) >= 4:
+        k = 3  # cubic spline
+    elif len(x) == 3:
+        k = 2  # quadratic spline
+    elif len(x) == 2:
+        k = 1  # linear interpolation
+    else:
+        # If only one point, create a simple point plot
+        fig, ax = plt.subplots(figsize=(5, 5), dpi=100)
+        ax.plot([dates[0]], [values[0]], marker='o', color=color)
+        
+        # Clean styling
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+        ax.spines['left'].set_visible(False)
+        ax.spines['bottom'].set_visible(False)
+        ax.tick_params(left=False, bottom=False)
+        ax.set_xticks([])
+        ax.set_yticks([])
+        
+        # Text info
+        ax.text(0.03, -0.2, title, transform=ax.transAxes,
+                fontsize=26, color='#5f6368')
+        ax.text(0.03, -0.39, f"{current_mentions:,}", transform=ax.transAxes,
+                fontsize=25, color='#202124', weight='bold')
+        ax.text(0.03, -0.55, f"{delta_sign}{delta:,} ({delta_sign}{round(mentions_percent_change)}%)",
+                transform=ax.transAxes, fontsize=18, color=delta_color, weight='bold')
+        
+        plt.tight_layout()
+        plt.savefig(save_file, bbox_inches='tight', dpi=150, transparent=True)
+        return
+    
+    spline = make_interp_spline(x, y, k=k)
     y_smooth = spline(x_smooth)
 
     # Convert x_smooth back to datetime scale
@@ -155,11 +189,21 @@ def plot_current_vs_previous_period(data, title="Current vs Previous Period", sa
 
     # Smoothing only for plotting
     def smooth(x, y):
-        if len(x) < 4:
+        if len(x) < 2:  # If only one point, return as is
             return x, y
+            
         x_numeric = np.arange(len(x))
-        spl = make_interp_spline(x_numeric, y, k=3)
         xnew = np.linspace(x_numeric.min(), x_numeric.max(), 300)
+        
+        # Choose spline degree based on number of points
+        if len(x) >= 4:
+            k = 3  # cubic spline
+        elif len(x) == 3:
+            k = 2  # quadratic spline
+        else:
+            k = 1  # linear interpolation
+            
+        spl = make_interp_spline(x_numeric, y, k=k)
         ynew = spl(xnew)
         x_interp = np.interp(xnew, x_numeric, x.astype(np.int64) // 10**9)
         x_interp = pd.to_datetime(x_interp, unit='s')
@@ -607,4 +651,4 @@ def generate_metrics_chart(KEYWORDS, START_DATE,
                                SAVE_PATH = SAVE_PATH)
 
         save_file = os.path.join(SAVE_PATH,f"{title}_trend.png")
-        plot_current_vs_previous_period(time_series, title=f"{title} Trend", save_path=save_file)        
+        plot_current_vs_previous_period(time_series, title=f"{title} Trend", save_path=save_file)
