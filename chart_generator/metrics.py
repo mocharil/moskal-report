@@ -23,7 +23,7 @@ def generate_date_range(start_date: str, end_date: str) -> List[str]:
     end_date : str
         Tanggal akhir dalam format 'YYYY-MM-DD'
         
-    Returns:
+        Tanggal akhir dalam format 'YYYY-MM-DD'
     --------
     List[str]
         Daftar tanggal dari start_date hingga end_date dalam format 'YYYY-MM-DD'
