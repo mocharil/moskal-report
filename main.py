@@ -343,7 +343,8 @@ def get_user_reports(email: str):
                             {"bool": {
                                 "should": [
                                     {"match": {"status": "pending"}},
-                                    {"match": {"status": "processing"}}
+                                    {"match": {"status": "processing"}},
+                                    {"match": {"status": "failed"}}
                                 ]
                             }}
                         ]
@@ -396,6 +397,70 @@ def get_user_reports(email: str):
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error retrieving reports: {str(e)}")
+
+@app.post("/regenerate-report")
+async def regenerate_report(
+    background_tasks: BackgroundTasks,
+    job_id: str,
+    email: Optional[str] = None
+):
+    try:
+        # Get the original job data
+        original_job = es.get(index="moskal-report-jobs", id=job_id)
+        job_data = original_job["_source"]
+
+        # Check if the job was failed
+        if job_data["status"] != "failed":
+            raise HTTPException(
+                status_code=400,
+                detail="Only failed reports can be regenerated"
+            )
+
+        # Update email if provided
+        if email:
+            job_data["email_receiver"] = email
+
+        # Reset job status
+        job_data["status"] = "pending"
+        job_data["progress"] = 0
+        job_data["created_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        # Update job in Elasticsearch
+        es.index(
+            index="moskal-report-jobs",
+            id=job_id,
+            document=job_data
+        )
+
+        # Start background processing
+        background_tasks.add_task(
+            process_report_generation,
+            job_id,
+            job_data["topic"],
+            job_data["start_date"],
+            job_data["end_date"],
+            job_data["sub_keyword"],
+            job_data["email_receiver"]
+        )
+
+        return JSONResponse(
+            content={
+                "status": "success",
+                "message": "Report regeneration started",
+                "data": {
+                    "job_id": job_id
+                }
+            },
+            status_code=202
+        )
+
+    except Exception as e:
+        if isinstance(e, HTTPException):
+            raise e
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error regenerating report: {str(e)}"
+        )
 
 @app.post("/generate-sub-keywords")
 def generate_keyword(topic: str = None):
