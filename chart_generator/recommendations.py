@@ -1,260 +1,249 @@
-from chart_generator.functions import *
-import concurrent.futures
 import json
 import os
-import re
 import pandas as pd
-import numpy as np
-import time
+import re
 
-from dotenv import load_dotenv
+# Import utilitas dari paket utils (sesuaikan dengan environment Anda)
+from chart_generator.functions import call_gemini
 
-load_dotenv()  
-BQ = About_BQ(project_id= os.getenv("BQ_PROJECT_ID") ,
-         credentials_loc= os.getenv("BQ_CREDS_LOCATION")  )
-         
-def get_top_platforms(ALL_FILTER, platforms=None, top_n=5):
-    """
-    Mengidentifikasi top N platform berdasarkan jumlah post dan engagement
-    """
-    if platforms is None:
-        platforms = ['tiktok', 'instagram', 'twitter', 'news', 'reddit', 'linkedin', 'youtube']
+def generate_recommendations(TOPIC,START_DATE, END_DATE,SAVE_PATH):
+   
+    # Inisialisasi dictionary untuk menyimpan semua data
+    data = {}
     
-    # Query untuk mendapatkan jumlah post dan engagement per platform
-    query = f"""
-    SELECT 
-        a.channel,
-        COUNT(*) as post_count
-        
-    FROM medsos.post_analysis a
-    WHERE {ALL_FILTER}
-    AND a.channel IN ({', '.join([f"'{p}'" for p in platforms])})
-    GROUP BY 1
-    ORDER BY post_count DESC
-    LIMIT {top_n}
-    """
+    # 1. Load sentiment_breakdown.json
+    try:
+        with open(os.path.join(SAVE_PATH, 'sentiment_breakdown.json'), 'r') as f:
+            data['sentiment_counts'] = json.load(f)
+        print("Loaded sentiment breakdown data")
+    except Exception as e:
+        print(f"Error loading sentiment breakdown: {e}")
+        data['sentiment_counts'] = {}
     
-    platform_stats = BQ.to_pull_data(query)
+    # 2. Load sentiment_by_categories.json
+    try:
+        with open(os.path.join(SAVE_PATH, 'sentiment_by_categories.json'), 'r') as f:
+            data['pivot_sentiment'] = json.load(f)
+        print("Loaded sentiment by categories data")
+    except Exception as e:
+        print(f"Error loading sentiment by categories: {e}")
+        data['pivot_sentiment'] = []
     
-    if platform_stats.empty:
-        return platforms[:top_n]  # Default to first top_n platforms if no data
+    # 3. Load presence_score_analysis.json
+    try:
+        with open(os.path.join(SAVE_PATH, 'presence_score_analysis.json'), 'r') as f:
+            data['presence_score_analysis'] = json.load(f)
+        print("Loaded presence score analysis")
+    except Exception as e:
+        print(f"Error loading presence score analysis: {e}")
+        data['presence_score_analysis'] = {}
     
-    top_platforms = platform_stats['channel'].tolist()
-    print(f"Top {top_n} platforms: {top_platforms}")
-    return top_platforms
-
-def get_social_data(ALL_FILTER, max_posts=50, platforms=None):
-    """
-    Mengambil data dari platform yang ditentukan dalam satu query
-    """
-    start_time = time.time()
+    # 4. Load sentiment_analysis.json
+    try:
+        with open(os.path.join(SAVE_PATH, 'sentiment_analysis.json'), 'r') as f:
+            data['sentiment_analysis'] = json.load(f)
+        print("Loaded sentiment analysis")
+    except Exception as e:
+        print(f"Error loading sentiment analysis: {e}")
+        data['sentiment_analysis'] = {}
     
-    if platforms is None or len(platforms) == 0:
-        platforms = ['tiktok', 'instagram', 'twitter','news']
+    # 5. Load popular_mentions.csv
+    try:
+        data['popular_mentions'] = pd.read_csv(os.path.join(SAVE_PATH, 'popular_mentions.csv')).to_dict(orient='records')[:10]  # Limit to top 10
+        print("Loaded popular mentions data")
+    except Exception as e:
+        print(f"Error loading popular mentions: {e}")
+        data['popular_mentions'] = []
     
-    # Query untuk platform yang dipilih sekaligus
-    query = f"""
-    WITH DATA AS (
-      SELECT 
-        a.post_caption, 
-        a.channel, 
-        a.likes, 
-        a.comments,
-        a.shares,
-        a.favorites,
-        a.views,
-        a.retweets,
-        a.replies,
-        a.votes,
-        a.reposts,
-        c.sentiment, 
-        c.intent, 
-        c.emotions, 
-        c.region, 
-        u.category,
-        COALESCE(a.viral_score, 0) * 0.2 + 
-        COALESCE(a.reach_score, 0) * 0.2 + 
-        COALESCE(a.influence_score, 0) * 0.2 +
-        CASE
-          WHEN a.channel = 'youtube' THEN 
-            COALESCE(a.likes, 0)*0.4 + COALESCE(a.views, 0)*0.3 + COALESCE(a.comments, 0)*0.3
-          WHEN a.channel = 'twitter' THEN 
-            COALESCE(a.likes, 0)*0.3 + COALESCE(a.views, 0)*0.2 + COALESCE(a.shares, 0)*0.3 + COALESCE(a.favorites, 0)*0.2
-          WHEN a.channel = 'tiktok' THEN 
-            COALESCE(a.likes, 0)*0.3 + COALESCE(a.views, 0)*0.3 + COALESCE(a.comments, 0)*0.2 + COALESCE(a.shares, 0)*0.2
-          WHEN a.channel = 'instagram' THEN 
-            COALESCE(a.likes, 0)*0.4 + COALESCE(a.views, 0)*0.3 + COALESCE(a.comments, 0)*0.3
-          WHEN a.channel = 'linkedin' THEN 
-            COALESCE(a.likes, 0)*0.4 + COALESCE(a.views, 0)*0.2 + COALESCE(a.comments, 0)*0.2 + COALESCE(a.shares, 0)*0.2
-          WHEN a.channel = 'reddit' THEN 
-            COALESCE(a.votes, 0)*0.7 + COALESCE(a.comments, 0)*0.3
-          ELSE
-            COALESCE(a.likes, 0)*0.25 + COALESCE(a.views, 0)*0.15 + 
-            COALESCE(a.comments, 0)*0.15 + COALESCE(a.shares, 0)*0.15 + 
-            COALESCE(a.reposts, 0)*0.1 + COALESCE(a.replies, 0)*0.1 + 
-            COALESCE(a.votes, 0)*0.05 + COALESCE(a.favorites, 0)*0.05
-        END AS enhanced_raw_score
-
-      FROM medsos.post_analysis a
-      JOIN medsos.post_category c ON a.link_post = c.link_post
-      LEFT JOIN medsos.user_category u ON u.username = a.username AND u.channel = a.channel
-      WHERE {ALL_FILTER}
-      AND a.channel IN ({', '.join([f"'{p}'" for p in platforms])})
-    ),
-    RANKED_DATA AS (
-      SELECT *,
-        ROW_NUMBER() OVER (PARTITION BY channel ORDER BY enhanced_raw_score DESC) as rank
-      FROM DATA
-    )
+    # 6. Load KOL data
+    try:
+        kol_data = []
+        with open(os.path.join(SAVE_PATH, 'kol.json'), 'r') as f:
+            for line in f:
+                kol_data.append(json.loads(line.strip()))
+        data['kol_data'] = kol_data[:10]  # Limit to top 10
+        print("Loaded KOL data")
+    except Exception as e:
+        print(f"Error loading KOL data: {e}")
+        data['kol_data'] = []
     
-    SELECT * EXCEPT(enhanced_raw_score, rank)
-    FROM RANKED_DATA
-    WHERE rank <= {max_posts}
-    ORDER BY channel, rank
-    """
+    # 7. Load topic_overview.json
+    try:
+        topic_data = []
+        with open(os.path.join(SAVE_PATH, 'topic_overview.json'), 'r') as f:
+            for line in f:
+                topic_data.append(json.loads(line.strip()))
+        data['top_entities'] = topic_data[:15]  # Limit to top 15
+        print("Loaded topic overview data")
+    except Exception as e:
+        print(f"Error loading topic overview: {e}")
+        data['top_entities'] = []
     
-    data = BQ.to_pull_data(query)
+    # Extract platform data from sentiment_by_categories.json for list of top platforms
+    top_platforms = []
+    if data['pivot_sentiment']:
+        # Sort by total_mentions and get top 5 platforms
+        sorted_platforms = sorted(data['pivot_sentiment'], key=lambda x: x.get('total_mentions', 0), reverse=True)
+        top_platforms = [p.get('channel', '') for p in sorted_platforms[:5] if p.get('channel')]
     
-    # Membersihkan data dan mengelompokkan berdasarkan platform
-    platform_data = {}
-    for platform in platforms:
-        platform_rows = data[data['channel'] == platform]
-        
-        clean_rows = []
-        for _, row in platform_rows.iterrows():
-            row_dict = row.to_dict()
-            # Filter dictionary dan simpan hanya nilai yang valid
-            clean_dict = {k: v for k, v in row_dict.items() if pd.notna(v) and v not in ('<NA>', 'Not Specified', None)}
-            if clean_dict:
-                clean_rows.append(clean_dict)
-        
-        platform_data[platform] = clean_rows
-    
-    print(f"Data retrieval completed in {time.time() - start_time:.2f} seconds")
-    return platform_data
-
-def analyze_platform_parallel(platform_data, TOPIC, START_DATE, END_DATE):
-    """
-    Menganalisis data platform secara paralel untuk meningkatkan kecepatan
-    """
-    start_time = time.time()
-    
-    def analyze_single_platform(platform, data):
-        if not data:
-            return {'channel': platform, 'summarize': "No data available for analysis."}
-        
-        prompt = f"""
-        I'm analyzing social media conversation data about [{TOPIC}] from [{START_DATE}] to [{END_DATE}].
-
-        My data includes posts from {platform} with engagement metrics, sentiment analysis, 
-        detected intent, emotions, regional distribution, and user categories.
-
-        Based on the following sample data (up to 50 posts), create a concise 2-paragraph 
-        summary of hot issues, sentiment trends, user intent, and key insights:
-
-        {data[:min(50, len(data))]}
-        """
-        
-        # Implementasi retry untuk call_gemini
-        max_retries = 3
-        retry_count = 0
-        
-        while retry_count < max_retries:
-            try:
-                summarize = call_gemini(prompt)
-                return {'channel': platform, 'summarize': summarize}
-            except Exception as e:
-                retry_count += 1
-                if retry_count >= max_retries:
-                    return {'channel': platform, 'summarize': f"Error in analysis: {str(e)}"}
-                time.sleep(2 ** retry_count)  # Exponential backoff
-    
-    # Gunakan ThreadPoolExecutor untuk paralelisme
-    results = []
-    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
-        future_to_platform = {
-            executor.submit(analyze_single_platform, platform, data): platform
-            for platform, data in platform_data.items() if data
-        }
-        
-        for future in concurrent.futures.as_completed(future_to_platform):
-            platform = future_to_platform[future]
-            try:
-                result = future.result()
-                results.append(result)
-                print(f"Completed analysis for {platform}")
-            except Exception as e:
-                print(f"Error analyzing {platform}: {e}")
-                results.append({'channel': platform, 'summarize': f"Error in analysis: {str(e)}"})
-    
-    print(f"Platform analysis completed in {time.time() - start_time:.2f} seconds")
-    return results
-
-def generate_recommendations(TOPIC, START_DATE, END_DATE, ALL_FILTER, SAVE_PATH, top_n=4):
-    """
-    Fungsi utama yang dioptimasi untuk menghasilkan rekomendasi hanya dari top N platform
-    """
-    overall_start = time.time()
-    
-    # Step 1: Identifikasi top N platform berdasarkan aktivitas dan engagement
-    top_platforms = get_top_platforms(ALL_FILTER, top_n=top_n)
-    
-    # Step 2: Ambil data dari top platform saja
-    platform_data = get_social_data(ALL_FILTER, max_posts=50, platforms=top_platforms)
-    
-    # Step 3: Analisis data untuk setiap platform secara paralel
-    platform_analyses = analyze_platform_parallel(platform_data, TOPIC, START_DATE, END_DATE)
-    
-    # Step 4: Hasilkan rekomendasi berdasarkan analisis platform
+    # Build the prompt
     prompt = f"""
-    As a communications and media strategy expert, analyze these [{TOPIC}] reports from the top {top_n} social media platforms ({', '.join(top_platforms)}) for the period [{START_DATE}] to [{END_DATE}] and provide strategic recommendations:
+    You are a senior digital communications and media strategy expert. Analyze the following comprehensive data about [{TOPIC}] for the period [{START_DATE}] to [{END_DATE}] and provide strategic recommendations.
 
-    {platform_analyses}
+    ## SENTIMENT DATA
+    
+    Overall sentiment distribution:
+    {data['sentiment_counts']}
+    
+    Sentiment by platform/channel:
+    {data['pivot_sentiment'][:5] if data['pivot_sentiment'] else "No data available"}
+    """
+    
+    # Add presence score analysis if available
+    if data['presence_score_analysis']:
+        prompt += f"""
+    ## PRESENCE SCORE ANALYSIS
+    
+    Overall presence score trends:
+    {data['presence_score_analysis']}
+    """
+    
+    # Add sentiment analysis if available
+    if data['sentiment_analysis']:
+        prompt += f"""
+    ## DETAILED SENTIMENT ANALYSIS
+    
+    In-depth sentiment analysis:
+    {data['sentiment_analysis']}
+    """
+    
+    # Add popular mentions if available
+    if data['popular_mentions']:
+        prompt += f"""
+    ## POPULAR MENTIONS
+    
+    Sample of popular posts (top shown):
+    {data['popular_mentions'][:3]}
+    """
+    
+    # Add top entities if available
+    if data['top_entities']:
+        prompt += f"""
+    ## TOP ENTITIES/TOPICS
+    
+    Most discussed entities or subtopics:
+    {data['top_entities'][:10]}
+    """
+    
+    # Add KOL data if available
+    if data['kol_data']:
+        prompt += f"""
+    ## KEY OPINION LEADERS
+    
+    Top influencers discussing this topic:
+    {data['kol_data'][:5]}
+    """
+    
+    # Add list of top platforms
+    prompt += f"""
+    ## TOP PLATFORMS
+    
+    The most active platforms for this topic are:
+    {top_platforms if top_platforms else "Data not available"}
+    """
+    
+    # Instruksi dan format output
+    prompt += f"""
+    ## TASK
+    
+    Based on all the data above, provide strategic communication recommendations for managing and improving the discourse around [{TOPIC}].
 
-    Format your response as a JSON array with maximum 4 recommendation categories, each with:
-    - "title": Clear category description focusing on communication strategy
-    - "actions": Array of 2-3 specific, actionable steps
+    Format your response as a JSON array with EXACTLY 4 recommendation categories (no more, no less), each with:
+    - "title": A clear, specific category description focusing on communication strategy (limit to 10 words)
+    - "actions": An array of EXACTLY 3 specific, actionable steps (each 1-2 sentences long)
 
-    Example format:
+    The recommendations should be highly specific to {TOPIC} and directly address the sentiment, trends, and key concerns found in the data. DO NOT provide generic advice.
+
+    Each recommendation should be concrete, implementable, and directly tied to the data insights provided.
+
+    THE OUTPUT MUST BE VALID JSON. Use this exact format:
     [
       {{
-        "title": "Proactive Reputation Management",
-        "actions": ["action 1", "action 2","action 3"]
-      }}
+        "title": "Strategy Category Title",
+        "actions": [
+          "Specific actionable step one with clear direction.",
+          "Specific actionable step two with clear direction.",
+          "Specific actionable step three with clear direction."
+        ]
+      }},
+      ...
     ]
 
-    Focus only on relevant information to {TOPIC} and ensure all recommendations are concrete and implementable.
+    IMPORTANT: Ensure your output is ONLY the properly formatted JSON with no additional text, markdown, or explanatory content. The JSON array must contain EXACTLY 4 recommendation objects. Each recommendation must have EXACTLY 3 actions.
     """
     
+    print("Prompt generated, calling LLM...")
+    
     try:
+        # Call LLM to generate recommendations
         recommendations_text = call_gemini(prompt)
         
-        # Ekstrak JSON dari respons
+        # Try to parse JSON directly
         try:
-            json_string = re.findall(r'\[\s*\{.*?\}\s*\]', recommendations_text, re.DOTALL)
-            if json_string:
-                recommendations = json.loads(json_string[0])
+            recommendations = json.loads(recommendations_text)
+        except json.JSONDecodeError:
+            # Use regex as fallback if direct parsing fails
+            print("Direct JSON parsing failed, trying regex extraction...")
+            json_pattern = re.compile(r'\[\s*\{.*\}\s*\]', re.DOTALL)
+            json_match = json_pattern.search(recommendations_text)
+            
+            if json_match:
+                json_str = json_match.group(0)
+                recommendations = json.loads(json_str)
             else:
-                # Fallback jika regex tidak berhasil
-                recommendations = json.loads(recommendations_text)
-        except Exception as e:
-            print(f"Error parsing JSON: {e}")
-            # Fallback parsing sederhana
-            recommendations = []
-            for match in re.finditer(r'\{\s*"title":\s*"([^"]+)",\s*"actions":\s*\[(.*?)\]\s*\}', recommendations_text, re.DOTALL):
-                title = match.group(1)
-                actions_text = match.group(2)
-                actions = re.findall(r'"([^"]+)"', actions_text)
-                recommendations.append({"title": title, "actions": actions})
-        
-        # Simpan hasil ke file
+                # Last-resort fallback parsing for valid portions
+                print("Regex extraction failed, trying fallback parsing...")
+                title_pattern = re.compile(r'"title":\s*"([^"]+)"')
+                actions_pattern = re.compile(r'"actions":\s*\[(.*?)\]', re.DOTALL)
+                action_item_pattern = re.compile(r'"([^"]+)"')
+                
+                recommendations = []
+                
+                # Find all title matches
+                title_matches = title_pattern.finditer(recommendations_text)
+                for title_match in title_matches:
+                    title = title_match.group(1)
+                    # Find corresponding actions
+                    actions_match = actions_pattern.search(recommendations_text, title_match.end())
+                    if actions_match:
+                        actions_text = actions_match.group(1)
+                        actions = [m.group(1) for m in action_item_pattern.finditer(actions_text)]
+                        if actions:
+                            recommendations.append({"title": title, "actions": actions})
+                
+        # Save the recommendations to file
         with open(os.path.join(SAVE_PATH, 'recommendations.json'), 'w') as f:
             json.dump(recommendations, f, indent=2)
-        
-        print(f"Total processing time: {time.time() - overall_start:.2f} seconds")
-        print(f"Generated recommendations from top {top_n} platforms: {top_platforms}")
+            
+        print(f"Recommendations generated and saved to {os.path.join(SAVE_PATH, 'recommendations.json')}")
         return recommendations
-    
+        
     except Exception as e:
         print(f"Error generating recommendations: {e}")
-        return []
+        # Return fallback recommendations
+        fallback_recommendations = [
+            {
+                "title": "Error Processing Data",
+                "actions": [
+                    "Review input data files for completeness and formatting issues.",
+                    "Check LLM connection and retry with simplified prompt.",
+                    "Consider manual analysis if automation continues to fail."
+                ]
+            }
+        ]
+        
+        with open(os.path.join(SAVE_PATH, 'recommendations_error.json'), 'w') as f:
+            json.dump(fallback_recommendations, f, indent=2)
+            
+        return fallback_recommendations
+

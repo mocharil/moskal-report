@@ -1,232 +1,70 @@
+import json
+import pandas as pd
+from datetime import datetime, timedelta
+from typing import Dict, List, Optional, Union, Any
 from chart_generator.functions import *
-
 from dotenv import load_dotenv
-
+from elasticsearch import Elasticsearch
 load_dotenv()  
-BQ = About_BQ(project_id= os.getenv("BQ_PROJECT_ID") ,
-         credentials_loc= os.getenv("BQ_CREDS_LOCATION")  )
 
-
-############### METRICS ###############    
-def get_time_series(FILTER_KEYWORD, START_DATE, END_DATE, prev_start_date, prev_end_date):
-    diff_date = range_date_count(START_DATE, END_DATE)
-    query = f"""WITH 
-        -- Define the date ranges
-        date_ranges AS (
-            SELECT 
-                DATE('{START_DATE}') AS current_start_date,
-                DATE('{END_DATE}') AS current_end_date,
-                DATE('{prev_start_date}') AS previous_start_date,
-                DATE('{prev_end_date}') AS previous_end_date
-        ),
-
-        -- Time series data for mentions - CURRENT PERIOD
-        mentions_time_series AS (
-            SELECT 
-                DATE(a.post_created_at) as date,
-                COUNT(*) as value,
-                'current' as period
-            FROM `medsos.post_analysis` a
-            JOIN `medsos.post_category` c
-            ON a.link_post = c.link_post
-            CROSS JOIN date_ranges d
-            WHERE DATE(a.post_created_at) BETWEEN d.current_start_date AND d.current_end_date
-            AND {FILTER_KEYWORD}
-            GROUP BY date
-            ORDER BY date
-        ),
-
-        -- Time series data for mentions - PREVIOUS PERIOD
-        mentions_time_series_prev AS (
-            SELECT 
-                DATE_ADD(DATE(a.post_created_at), INTERVAL {diff_date} DAY) as date, -- Shift dates to align with current period
-                COUNT(*) as value,
-                'previous' as period
-            FROM `medsos.post_analysis` a
-            JOIN `medsos.post_category` c
-            ON a.link_post = c.link_post
-            CROSS JOIN date_ranges d
-            WHERE DATE(a.post_created_at) BETWEEN d.previous_start_date AND d.previous_end_date
-            AND {FILTER_KEYWORD}
-            GROUP BY date
-            ORDER BY date
-        ),
-
-        -- Social reach time series - CURRENT PERIOD
-        social_reach_time_series AS (
-            SELECT 
-                DATE(a.post_created_at) as date,
-                SUM(a.reach_score) as value,
-                'current' as period
-            FROM `medsos.post_analysis` a
-            JOIN `medsos.post_category` c
-            ON a.link_post = c.link_post
-            CROSS JOIN date_ranges d
-            WHERE DATE(a.post_created_at) BETWEEN d.current_start_date AND d.current_end_date
-            AND {FILTER_KEYWORD}
-            AND a.channel != 'news'
-            GROUP BY date
-            ORDER BY date
-        ),
-
-        -- Social reach time series - PREVIOUS PERIOD
-        social_reach_time_series_prev AS (
-            SELECT 
-                DATE_ADD(DATE(a.post_created_at), INTERVAL {diff_date} DAY) as date,
-                SUM(a.reach_score) as value,
-                'previous' as period
-            FROM `medsos.post_analysis` a
-            JOIN `medsos.post_category` c
-            ON a.link_post = c.link_post
-            CROSS JOIN date_ranges d
-            WHERE DATE(a.post_created_at) BETWEEN d.previous_start_date AND d.previous_end_date
-            AND {FILTER_KEYWORD}
-            AND a.channel != 'news'
-            GROUP BY date
-            ORDER BY date
-        ),
-
-        -- Non-social reach time series - CURRENT PERIOD
-        non_social_reach_time_series AS (
-            SELECT 
-                DATE(a.post_created_at) as date,
-                SUM(a.reach_score) as value,
-                'current' as period
-            FROM `medsos.post_analysis` a
-            JOIN `medsos.post_category` c
-            ON a.link_post = c.link_post
-            CROSS JOIN date_ranges d
-            WHERE DATE(a.post_created_at) BETWEEN d.current_start_date AND d.current_end_date
-            AND {FILTER_KEYWORD}
-            AND a.channel = 'news'
-            GROUP BY date
-            ORDER BY date
-        ),
-
-        -- Non-social reach time series - PREVIOUS PERIOD
-        non_social_reach_time_series_prev AS (
-            SELECT 
-                DATE_ADD(DATE(a.post_created_at), INTERVAL {diff_date} DAY) as date,
-                SUM(a.reach_score) as value,
-                'previous' as period
-            FROM `medsos.post_analysis` a
-            JOIN `medsos.post_category` c
-            ON a.link_post = c.link_post
-            CROSS JOIN date_ranges d
-            WHERE DATE(a.post_created_at) BETWEEN d.previous_start_date AND d.previous_end_date
-            AND {FILTER_KEYWORD}
-            AND a.channel = 'news'
-            GROUP BY date
-            ORDER BY date
-        ),
-
-        -- Positive sentiment time series - CURRENT PERIOD
-        positive_time_series AS (
-            SELECT 
-                DATE(a.post_created_at) as date,
-                COUNT(*) as value,
-                'current' as period
-            FROM `medsos.post_analysis` a
-            JOIN `medsos.post_category` c
-            ON a.link_post = c.link_post
-            CROSS JOIN date_ranges d
-            WHERE DATE(a.post_created_at) BETWEEN d.current_start_date AND d.current_end_date
-            AND {FILTER_KEYWORD}
-            AND c.sentiment = 'positive'
-            GROUP BY date
-            ORDER BY date
-        ),
-
-        -- Positive sentiment time series - PREVIOUS PERIOD
-        positive_time_series_prev AS (
-            SELECT 
-                DATE_ADD(DATE(a.post_created_at), INTERVAL {diff_date} DAY) as date,
-                COUNT(*) as value,
-                'previous' as period
-            FROM `medsos.post_analysis` a
-            JOIN `medsos.post_category` c
-            ON a.link_post = c.link_post
-            CROSS JOIN date_ranges d
-            WHERE DATE(a.post_created_at) BETWEEN d.previous_start_date AND d.previous_end_date
-            AND {FILTER_KEYWORD}
-            AND c.sentiment = 'positive'
-            GROUP BY date
-            ORDER BY date
-        ),
-
-        -- Negative sentiment time series - CURRENT PERIOD
-        negative_time_series AS (
-            SELECT 
-                DATE(a.post_created_at) as date,
-                COUNT(*) as value,
-                'current' as period
-            FROM `medsos.post_analysis` a
-            JOIN `medsos.post_category` c
-            ON a.link_post = c.link_post
-            CROSS JOIN date_ranges d
-            WHERE DATE(a.post_created_at) BETWEEN d.current_start_date AND d.current_end_date
-            AND {FILTER_KEYWORD}
-            AND c.sentiment = 'negative'
-            GROUP BY date
-            ORDER BY date
-        ),
-
-        -- Negative sentiment time series - PREVIOUS PERIOD
-        negative_time_series_prev AS (
-            SELECT 
-                DATE_ADD(DATE(a.post_created_at), INTERVAL {diff_date} DAY) as date,
-                COUNT(*) as value,
-                'previous' as period
-            FROM `medsos.post_analysis` a
-            JOIN `medsos.post_category` c
-            ON a.link_post = c.link_post
-            CROSS JOIN date_ranges d
-            WHERE DATE(a.post_created_at) BETWEEN d.previous_start_date AND d.previous_end_date
-            AND {FILTER_KEYWORD}
-            AND c.sentiment = 'negative'
-            GROUP BY date
-            ORDER BY date
-        ),
-
-        -- Combine current and previous for each metric
-        mentions_combined AS (
-            SELECT * FROM mentions_time_series
-            UNION ALL
-            SELECT * FROM mentions_time_series_prev
-        ),
-
-        social_reach_combined AS (
-            SELECT * FROM social_reach_time_series
-            UNION ALL
-            SELECT * FROM social_reach_time_series_prev
-        ),
-
-        non_social_reach_combined AS (
-            SELECT * FROM non_social_reach_time_series
-            UNION ALL
-            SELECT * FROM non_social_reach_time_series_prev
-        ),
-
-        positive_combined AS (
-            SELECT * FROM positive_time_series
-            UNION ALL
-            SELECT * FROM positive_time_series_prev
-        ),
-
-        negative_combined AS (
-            SELECT * FROM negative_time_series
-            UNION ALL
-            SELECT * FROM negative_time_series_prev
+es = Elasticsearch(os.getenv('ES_HOST',"http://34.101.178.71:9200/"),
+    basic_auth=(os.getenv("ES_USERNAME","elastic"),os.getenv('ES_PASSWORD',"elasticpassword"))  # Sesuaikan dengan kredensial Anda
         )
 
-    SELECT
-        (SELECT ARRAY_AGG(STRUCT(date, value, period)) FROM mentions_combined) as mentions_time_series,
-        (SELECT ARRAY_AGG(STRUCT(date, value, period)) FROM social_reach_combined) as social_reach_time_series,
-        (SELECT ARRAY_AGG(STRUCT(date, value, period)) FROM non_social_reach_combined) as non_social_reach_time_series,
-        (SELECT ARRAY_AGG(STRUCT(date, value, period)) FROM positive_combined) as positive_time_series,
-        (SELECT ARRAY_AGG(STRUCT(date, value, period)) FROM negative_combined) as negative_time_series"""
 
-    return BQ.to_pull_data(query)
+def generate_date_range(start_date: str, end_date: str) -> List[str]:
+    """
+    Menghasilkan daftar tanggal dari start_date hingga end_date.
+    
+    Parameters:
+    -----------
+    start_date : str
+        Tanggal awal dalam format 'YYYY-MM-DD'
+    end_date : str
+        Tanggal akhir dalam format 'YYYY-MM-DD'
+        
+    Returns:
+    --------
+    List[str]
+        Daftar tanggal dari start_date hingga end_date dalam format 'YYYY-MM-DD'
+    """
+    start = datetime.strptime(start_date, "%Y-%m-%d")
+    end = datetime.strptime(end_date, "%Y-%m-%d")
+    date_range = []
+    
+    current = start
+    while current <= end:
+        date_range.append(current.strftime("%Y-%m-%d"))
+        current += timedelta(days=1)
+    
+    return date_range
+
+def build_keyword_filter(keywords: List[str]) -> Dict:
+    """
+    Membangun filter Elasticsearch untuk list keywords.
+    
+    Parameters:
+    -----------
+    keywords : List[str]
+        Daftar keyword yang akan difilter
+        
+    Returns:
+    --------
+    Dict
+        Filter Elasticsearch untuk keyword
+    """
+    keyword_should_conditions = []
+    
+    for kw in keywords:
+        keyword_should_conditions.append({"match": {"post_caption": {"query": kw, "operator": "AND"}}})
+        keyword_should_conditions.append({"match": {"issue": {"query": kw, "operator": "AND"}}})
+    
+    return {
+        "bool": {
+            "should": keyword_should_conditions,
+            "minimum_should_match": 1
+        }
+    }
 
 def generate_mentions_chart(title,data, current_mentions, previous_mentions, mentions_percent_change, SAVE_PATH = 'PPT'):
     # Extract date and values
@@ -386,12 +224,346 @@ def plot_current_vs_previous_period(data, title="Current vs Previous Period", sa
 
     if save_path:
         plt.savefig(save_path, bbox_inches='tight', dpi=150, transparent=True)
+       
+def get_time_series(FILTER_KEYWORD, START_DATE, END_DATE, prev_start_date=None, prev_end_date=None):
+    """
+    Mengambil data time series dari Elasticsearch dengan parameter yang sama 
+    seperti fungsi SQL original, tetapi menggunakan pendekatan aggregasi.
+    
+    Parameters:
+    -----------
+    FILTER_KEYWORD : List[str]
+        Daftar keyword untuk filter
+    START_DATE : str
+        Tanggal awal periode saat ini (YYYY-MM-DD)
+    END_DATE : str
+        Tanggal akhir periode saat ini (YYYY-MM-DD)
+    prev_start_date : str, optional
+        Tanggal awal periode sebelumnya (YYYY-MM-DD)
+    prev_end_date : str, optional
+        Tanggal akhir periode sebelumnya (YYYY-MM-DD)
+        
+    Returns:
+    --------
+    Dict
+        Dictionary dengan struktur yang sama dengan output SQL:
+        {
+            "mentions_time_series": [...],
+            "social_reach_time_series": [...],
+            "non_social_reach_time_series": [...],
+            "positive_time_series": [...],
+            "negative_time_series": [...]
+        }
+    """
+    # Buat koneksi Elasticsearch
+    # Sesuaikan dengan detail koneksi Anda
 
-def generate_metrics_chart(ALL_FILTER, FILTER_KEYWORD,FILTER_DATE, START_DATE, 
+    
+    # Definisikan semua channel dan indeks
+    default_channels = ['reddit', 'youtube', 'linkedin', 'twitter', 
+                        'tiktok', 'instagram', 'facebook', 'news', 'threads']
+    indices = [f"{ch}_data" for ch in default_channels]
+    
+    # Hitung tanggal untuk periode sebelumnya jika tidak disediakan
+    diff_date = range_date_count(START_DATE, END_DATE)
+    if prev_start_date is None:
+        prev_start_date = kurangi_tanggal(START_DATE, diff_date + 1)
+    if prev_end_date is None:
+        prev_end_date = kurangi_tanggal(END_DATE, diff_date + 1)
+    
+    # Siapkan struktur output
+    result = {
+        "mentions_time_series": [],
+        "social_reach_time_series": [],
+        "non_social_reach_time_series": [],
+        "positive_time_series": [],
+        "negative_time_series": []
+    }
+    
+    # Build keyword filter
+    keyword_filter = build_keyword_filter(FILTER_KEYWORD)
+    
+    # === PROSES PERIODE SAAT INI DENGAN AGGREGASI ===
+    # 1. Membuat query dengan date_histogram aggregation
+    current_aggs_query = {
+        "size": 0,
+        "query": {
+            "bool": {
+                "must": [
+                    {
+                        "range": {
+                            "post_created_at": {
+                                "gte": START_DATE,
+                                "lte": END_DATE
+                            }
+                        }
+                    },
+                    keyword_filter
+                ]
+            }
+        },
+        "aggs": {
+            "mentions_per_day": {
+                "date_histogram": {
+                    "field": "post_created_at",
+                    "calendar_interval": "day",
+                    "format": "yyyy-MM-dd",
+                    "min_doc_count": 0,
+                    "extended_bounds": {
+                        "min": START_DATE,
+                        "max": END_DATE
+                    }
+                },
+                "aggs": {
+                    "social_reach": {
+                        "filter": {
+                            "bool": {
+                                "must_not": [
+                                    {
+                                        "term": {
+                                            "channel": "news"
+                                        }
+                                    }
+                                ]
+                            }
+                        },
+                        "aggs": {
+                            "total": {
+                                "sum": {
+                                    "field": "reach_score"
+                                }
+                            }
+                        }
+                    },
+                    "non_social_reach": {
+                        "filter": {
+                            "term": {
+                                "channel": "news"
+                            }
+                        },
+                        "aggs": {
+                            "total": {
+                                "sum": {
+                                    "field": "reach_score"
+                                }
+                            }
+                        }
+                    },
+                    "positive_sentiment": {
+                        "filter": {
+                            "term": {
+                                "sentiment": "positive"
+                            }
+                        }
+                    },
+                    "negative_sentiment": {
+                        "filter": {
+                            "term": {
+                                "sentiment": "negative"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    # Execute query untuk periode saat ini
+    current_response = es.search(
+        index=",".join(indices),
+        body=current_aggs_query
+    )
+    
+    # Proses hasil untuk periode saat ini
+    current_buckets = current_response["aggregations"]["mentions_per_day"]["buckets"]
+    
+    for bucket in current_buckets:
+        date = bucket["key_as_string"]
+        
+        # Mentions time series
+        result["mentions_time_series"].append({
+            "date": date,
+            "value": bucket["doc_count"],
+            "period": "current"
+        })
+        
+        # Social reach time series
+        result["social_reach_time_series"].append({
+            "date": date,
+            "value": bucket["social_reach"]["total"]["value"] if "total" in bucket["social_reach"] else 0,
+            "period": "current"
+        })
+        
+        # Non-social reach time series
+        result["non_social_reach_time_series"].append({
+            "date": date,
+            "value": bucket["non_social_reach"]["total"]["value"] if "total" in bucket["non_social_reach"] else 0,
+            "period": "current"
+        })
+        
+        # Positive sentiment time series
+        result["positive_time_series"].append({
+            "date": date,
+            "value": bucket["positive_sentiment"]["doc_count"],
+            "period": "current"
+        })
+        
+        # Negative sentiment time series
+        result["negative_time_series"].append({
+            "date": date,
+            "value": bucket["negative_sentiment"]["doc_count"],
+            "period": "current"
+        })
+    
+    # === PROSES PERIODE SEBELUMNYA DENGAN AGGREGASI ===
+    # 1. Membuat query dengan date_histogram aggregation
+    previous_aggs_query = {
+        "size": 0,
+        "query": {
+            "bool": {
+                "must": [
+                    {
+                        "range": {
+                            "post_created_at": {
+                                "gte": prev_start_date,
+                                "lte": prev_end_date
+                            }
+                        }
+                    },
+                    keyword_filter
+                ]
+            }
+        },
+        "aggs": {
+            "mentions_per_day": {
+                "date_histogram": {
+                    "field": "post_created_at",
+                    "calendar_interval": "day",
+                    "format": "yyyy-MM-dd",
+                    "min_doc_count": 0,
+                    "extended_bounds": {
+                        "min": prev_start_date,
+                        "max": prev_end_date
+                    }
+                },
+                "aggs": {
+                    "social_reach": {
+                        "filter": {
+                            "bool": {
+                                "must_not": [
+                                    {
+                                        "term": {
+                                            "channel": "news"
+                                        }
+                                    }
+                                ]
+                            }
+                        },
+                        "aggs": {
+                            "total": {
+                                "sum": {
+                                    "field": "reach_score"
+                                }
+                            }
+                        }
+                    },
+                    "non_social_reach": {
+                        "filter": {
+                            "term": {
+                                "channel": "news"
+                            }
+                        },
+                        "aggs": {
+                            "total": {
+                                "sum": {
+                                    "field": "reach_score"
+                                }
+                            }
+                        }
+                    },
+                    "positive_sentiment": {
+                        "filter": {
+                            "term": {
+                                "sentiment": "positive"
+                            }
+                        }
+                    },
+                    "negative_sentiment": {
+                        "filter": {
+                            "term": {
+                                "sentiment": "negative"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    # Execute query untuk periode sebelumnya
+    previous_response = es.search(
+        index=",".join(indices),
+        body=previous_aggs_query
+    )
+    
+    # Proses hasil untuk periode sebelumnya
+    previous_buckets = previous_response["aggregations"]["mentions_per_day"]["buckets"]
+    
+    # Dapatkan list tanggal periode saat ini untuk "menggeser" tanggal periode sebelumnya
+    current_dates = [bucket["key_as_string"] for bucket in current_buckets]
+    
+    # Proses hanya jika ada data di kedua periode yang sebanding
+    if len(previous_buckets) > 0 and len(current_dates) > 0:
+        # Terbatas pada jumlah hari yang sama dengan periode saat ini
+        max_days = min(len(previous_buckets), len(current_dates))
+        
+        for i in range(max_days):
+            previous_bucket = previous_buckets[i]
+            display_date = current_dates[i] if i < len(current_dates) else None
+            
+            if display_date is None:
+                continue
+            
+            # Mentions time series
+            result["mentions_time_series"].append({
+                "date": display_date,
+                "value": previous_bucket["doc_count"],
+                "period": "previous"
+            })
+            
+            # Social reach time series
+            result["social_reach_time_series"].append({
+                "date": display_date,
+                "value": previous_bucket["social_reach"]["total"]["value"] if "total" in previous_bucket["social_reach"] else 0,
+                "period": "previous"
+            })
+            
+            # Non-social reach time series
+            result["non_social_reach_time_series"].append({
+                "date": display_date,
+                "value": previous_bucket["non_social_reach"]["total"]["value"] if "total" in previous_bucket["non_social_reach"] else 0,
+                "period": "previous"
+            })
+            
+            # Positive sentiment time series
+            result["positive_time_series"].append({
+                "date": display_date,
+                "value": previous_bucket["positive_sentiment"]["doc_count"],
+                "period": "previous"
+            })
+            
+            # Negative sentiment time series
+            result["negative_time_series"].append({
+                "date": display_date,
+                "value": previous_bucket["negative_sentiment"]["doc_count"],
+                "period": "previous"
+            })
+    
+    return result
+
+def generate_metrics_chart(KEYWORDS, START_DATE, 
                            END_DATE, prev_start_date, prev_end_date, SAVE_PATH = 'PPT'):
     
-    metrics_data_time_series = get_time_series(FILTER_KEYWORD, START_DATE, END_DATE, prev_start_date, prev_end_date)
-
     metrics_chart_config = {
         'mentions': ('Volume of mentions','mentions_time_series', 'current_mentions', 'previous_mentions', 'mentions_percent_change'),
         'social_reach': ('Social media reach','social_reach_time_series', 'current_social_reach', 'previous_social_reach', 'social_reach_percent_change'),
@@ -400,18 +572,32 @@ def generate_metrics_chart(ALL_FILTER, FILTER_KEYWORD,FILTER_DATE, START_DATE,
         'negative': ('Negative','negative_time_series', 'current_negative', 'previous_negative', 'negative_percent_change'),
     }
 
-    # Generate all charts
-        
+    # Mendapatkan data time series
+    time_series_data = get_time_series(
+        FILTER_KEYWORD=KEYWORDS,
+        START_DATE=START_DATE,
+        END_DATE=END_DATE,
+        prev_start_date=prev_start_date,
+        prev_end_date=prev_end_date
+    )
+    
     for metric, (title,ts_col, current_key, prev_key, change_key) in metrics_chart_config.items():
 
-        time_series = metrics_data_time_series[ts_col].tolist()
-        time_series = pd.DataFrame([j for i in time_series for j in i])
-        time_series['date'] = time_series['date'].astype(str)
+        time_series = time_series_data[ts_col]
+        time_series = pd.DataFrame(time_series)
 
         values = time_series[time_series['period']=='current']
         current_val = values['value'].sum()
         previous_val = time_series[time_series['period']=='previous']['value'].sum()
-        percent_change = ((current_val - previous_val) / previous_val) * 100
+
+        if previous_val != 0:
+            percent_change = ((current_val - previous_val) / previous_val) * 100
+        else:
+            percent_change = 0
+
+        # Ubah NaN menjadi 0 jika masih ada kemungkinan NaN
+        if pd.isna(percent_change):
+            percent_change = 0
 
         generate_mentions_chart(title,
                                 values[['date','value']].sort_values('date').to_dict(orient = 'records'),
@@ -422,17 +608,3 @@ def generate_metrics_chart(ALL_FILTER, FILTER_KEYWORD,FILTER_DATE, START_DATE,
 
         save_file = os.path.join(SAVE_PATH,f"{title}_trend.png")
         plot_current_vs_previous_period(time_series, title=f"{title} Trend", save_path=save_file)        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-  

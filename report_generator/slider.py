@@ -488,8 +488,8 @@ def create_kol(prs,DATA, TOPIC, RANGE_DATE, SAVE_FILE, page_number, title = 'Top
 
         # Format followers dengan K untuk ribuan
         followers_display = 'N/A'
-        if str(kol['followers']) != 'nan' and str(kol['followers']) != '<NA>':
-            followers_num = float(kol['followers'])
+        if str(kol['user_followers']) != 'nan' and str(kol['user_followers']) != '<NA>':
+            followers_num = float(kol['user_followers'])
             if followers_num >= 1000:
                 followers_display = f"{followers_num/1000:.1f}K".replace('.0K', 'K')
             else:
@@ -1095,3 +1095,186 @@ def slide_recommendations(prs, TOPIC, RANGE_DATE, SAVE_FILE, page_number = 3, SO
         
     prs.save(SAVE_FILE)
     print('------- Saved!!!')
+
+def slide_executive_summary(prs, TOPIC, RANGE_DATE, SAVE_FILE, page_number=2, SOURCE=SOURCE):
+    """
+    Creates an executive summary slide using the JSON format from the executive_summary.json file.
+    
+    Parameters:
+    -----------
+    prs : PowerPoint presentation object
+        The presentation to add the slide to
+    TOPIC : str
+        Main topic of the presentation
+    RANGE_DATE : str
+        Date range for the analysis
+    SAVE_FILE : str
+        Path to save the PowerPoint file
+    page_number : int, optional
+        The page number for this slide (default: 2)
+    SOURCE : str
+        Directory path where the executive_summary.json file is located
+    """
+    print("> Generate Executive Summary")
+    
+    try:
+        # Load the executive summary JSON file
+        with open(os.path.join(SOURCE, 'executive_summary.json')) as f:
+            summary_data = json.load(f)
+            
+        # Extract the summary section
+        summary = summary_data.get("summary", {})
+        
+        # Use blank layout
+        slide = prs.slides.add_slide(prs.slide_layouts[6])
+        add_slide_template(
+            slide,
+            topic=TOPIC,
+            range_date=RANGE_DATE,
+            page_num=page_number,
+            total_pages=12,
+            icon_path=CALENDAR_PATH
+        )
+
+        # Add title
+        add_chart_title(slide, "Executive Summary", Cm(1), Cm(1.64), Cm(15), Cm(1), 
+                       Pt(18), "Arial", RGBColor(0, 0, 0), True)
+
+        # Add underline for section title
+        line_title(slide, Cm(1.23), Cm(2.63), Cm(4), Cm(0.07))
+
+        # Create text box for content
+        content_box = slide.shapes.add_textbox(Cm(1), Cm(3), Cm(30.93), Cm(13))
+        text_frame = content_box.text_frame
+        text_frame.word_wrap = True
+        
+        # Function to add styled text
+        def add_styled_section(title, points_list=None, topics_list=None, mentions_list=None):
+            # Add section title
+            title_p = text_frame.add_paragraph()
+            title_run = title_p.add_run()
+            title_run.text = title
+            title_run.font.bold = True
+            title_run.font.size = Pt(14)
+            title_run.font.color.rgb = RGBColor(0, 83, 192)  # Blue color
+            title_p.level = 0
+            
+            # Add bullet points if provided
+            if points_list:
+                for point in points_list:
+                    point_p = text_frame.add_paragraph()
+                    point_p.text = f"• {point}"
+                    point_p.level = 1
+                    point_p.font.size = Pt(12)
+            
+            # Add topics if provided
+            if topics_list:
+                for topic in topics_list:
+                    # Topic name and stats
+                    topic_p = text_frame.add_paragraph()
+                    topic_name = topic.get("name", "")
+                    topic_reach = topic.get("reach", "")
+                    topic_sentiment = topic.get("sentiment", "")
+                    
+                    topic_text = f"• {topic_name}"
+                    if topic_reach:
+                        topic_text += f" ({topic_reach})"
+                    if topic_sentiment:
+                        topic_text += f" - {topic_sentiment}"
+                    
+                    topic_p.text = topic_text
+                    topic_p.level = 1
+                    topic_p.font.size = Pt(12)
+                    topic_p.font.bold = True
+                    
+                    # Key points for each topic
+                    key_points = topic.get("key_points", [])
+                    for key_point in key_points:
+                        key_point_p = text_frame.add_paragraph()
+                        key_point_p.text = f"  - {key_point}"
+                        key_point_p.level = 2
+                        key_point_p.font.size = Pt(11)
+            
+            # Add negative mentions if provided
+            if mentions_list:
+                for i, mention in enumerate(mentions_list):
+                    mention_p = text_frame.add_paragraph()
+                    source = mention.get("source", "")
+                    description = mention.get("description", "")
+                    mention_p.text = f"• {i+1}. {source}: {description}"
+                    mention_p.level = 1
+                    mention_p.font.size = Pt(12)
+            
+            # Add empty paragraph for spacing
+            text_frame.add_paragraph()
+        
+        # Add Scope and Sentiment section
+        scope_section = summary.get("scope_and_sentiment", {})
+        if scope_section:
+            add_styled_section(
+                scope_section.get("title", "🔹 Scope and Overall Sentiment:"),
+                points_list=scope_section.get("points", [])
+            )
+        
+        # Add Dominant Topics section
+        topics_section = summary.get("dominant_topics", {})
+        if topics_section:
+            add_styled_section(
+                topics_section.get("title", "🔹 Dominant Topics:"),
+                topics_list=topics_section.get("topics", [])
+            )
+        
+        # Add Peak Periods section
+        peak_section = summary.get("peak_periods", {})
+        if peak_section:
+            add_styled_section(
+                peak_section.get("title", "🔹 Peak Periods:"),
+                points_list=peak_section.get("points", [])
+            )
+        
+        # Add Negative Sentiment section
+        negative_section = summary.get("negative_sentiment", {})
+        if negative_section:
+            add_styled_section(
+                negative_section.get("title", "🔹 Negative Sentiment Analysis:"),
+                mentions_list=negative_section.get("mentions", [])
+            )
+        
+        # Save the presentation
+        prs.save(SAVE_FILE)
+        print('------- Saved!!!')
+        
+    except Exception as e:
+        print(f"Error generating executive summary slide: {e}")
+        
+        # Create a basic error slide
+        slide = prs.slides.add_slide(prs.slide_layouts[6])
+        add_slide_template(
+            slide,
+            topic=TOPIC,
+            range_date=RANGE_DATE,
+            page_num=page_number,
+            total_pages=12,
+            icon_path=CALENDAR_PATH
+        )
+
+        # Add title
+        add_chart_title(slide, "Executive Summary", Cm(1), Cm(1.64), Cm(15), Cm(1), 
+                      Pt(18), "Arial", RGBColor(0, 0, 0), True)
+
+        # Add underline for section title
+        line_title(slide, Cm(1.23), Cm(2.63), Cm(4), Cm(0.07))
+
+        # Create text box for error message
+        content_box = slide.shapes.add_textbox(Cm(1), Cm(3), Cm(30.93), Cm(13))
+        text_frame = content_box.text_frame
+        text_frame.word_wrap = True
+        
+        error_p = text_frame.add_paragraph()
+        error_p.text = "Error loading executive summary data. Please check the JSON file format."
+        error_p.font.size = Pt(14)
+        error_p.font.color.rgb = RGBColor(255, 0, 0)  # Red color for error
+        
+        # Save the presentation
+        prs.save(SAVE_FILE)
+        print('------- Saved with error message!!!')

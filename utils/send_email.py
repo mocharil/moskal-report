@@ -1,22 +1,24 @@
-
 import smtplib, os
 from email import encoders
 from email.mime.base import MIMEBase
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from dotenv import load_dotenv
+
+# Load credentials from .env
 load_dotenv()
 
 def send_email(FILE, to, TOPIC, RANGE_DATE):
+    # Config
+    smtp_server = "smtp.zoho.com"
+    smtp_port = 587
+    sender_email = os.getenv('EMAIL_SENDER')       # e.g., info@moskal.id
+    sender_password = os.getenv("EMAIL_PASSWORD")  # Zoho App Password!
 
-
-    sender_email = os.getenv('EMAIL_SENDER')
-    sender_password = os.getenv("EMAIL_PASSWORD")
-   
-    # Subject
+    # Email subject
     subject = f"Your {TOPIC} Report from {RANGE_DATE} is Ready!"
 
-    # Body email (HTML version)
+    # HTML content
     message_text = f"""
     <html>
     <body>
@@ -38,28 +40,34 @@ def send_email(FILE, to, TOPIC, RANGE_DATE):
     """
 
     cc = ""
-    
-    filenames  = [FILE]
+
+    # Construct message
     message = MIMEMultipart()
     message['Subject'] = subject
     message['From'] = sender_email
     message['To'] = to
     message['Cc'] = cc
-    
-    # Attach HTML content
+
+    # Attach HTML
     html_part = MIMEText(message_text, "html")
     message.attach(html_part)
 
-    # Attach files
-    for filename in filenames:
-        with open(filename, "rb") as attachment:
+    if FILE:
+        # Attach file
+        with open(FILE, "rb") as attachment:
             part = MIMEBase("application", "octet-stream")
             part.set_payload(attachment.read())
             encoders.encode_base64(part)
-            part.add_header("Content-Disposition", f"attachment; filename= {filename}")
+            part.add_header("Content-Disposition", f"attachment; filename= {os.path.basename(FILE)}")
             message.attach(part)
 
-    # Send email
-    with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
+    # Send email using Zoho SMTP with TLS
+    try:
+        server = smtplib.SMTP(smtp_server, smtp_port)
+        server.starttls()
         server.login(sender_email, sender_password)
-        server.sendmail(sender_email, [to] + [cc], message.as_string())
+        server.sendmail(sender_email, [to] + ([cc] if cc else []), message.as_string())
+        server.quit()
+        print("✅ Email sent successfully via Zoho!")
+    except Exception as e:
+        print(f"❌ Failed to send email: {e}")

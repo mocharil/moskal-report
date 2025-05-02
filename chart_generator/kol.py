@@ -1,100 +1,139 @@
-from chart_generator.functions import *
+from utils.list_of_mentions import get_filtered_mentions
+import pandas as pd
+import numpy as np
+from utils.gemini import call_gemini
+import re, json, os
 
-from dotenv import load_dotenv
 
-load_dotenv()  
-BQ = About_BQ(project_id= os.getenv("BQ_PROJECT_ID") ,
-         credentials_loc= os.getenv("BQ_CREDS_LOCATION")  )
-def get_new_name(username):
-    news = (username.replace('https://','').replace('www.',''))
-    new_name = re.findall(r'[a-zA-Z0-9\-]+\.(?:co|id|news|info|net)[\.idm]*', news)
-    if new_name:
-        return new_name[0]
-    return news
+def create_link_user(df):
+    if df['channel'] == 'twitter':
+        return f"""https://x.com/{df['username'].strip('@ ')}"""
+    if df['channel'] == 'instagram':
+        return f"""https://www.instagram.com/{df['username'].strip('@ ')}"""
+    if df['channel'] == 'tiktok':
+        return f"""https://www.tiktok.com/@{df['username'].strip('@ ')}"""
+    if df['channel']=='linkedin':
+        return f"""https://www.linkedin.com/in/{df['username'].strip('@ ')}"""
+    if df['channel']=='reddit':
+        return f"""https://www.reddit.com/{df['username'].strip('@ ')}"""
+    
+    
+    return df['username']
+     
+def add_negative_driver_flag(df):
+    """
+    Add is_negative_driver column that is True when sentiment_negative 
+    is the dominant sentiment
+    
+    Args:
+        df: DataFrame with sentiment_positive, sentiment_negative, and sentiment_neutral columns
+        
+    Returns:
+        DataFrame with added is_negative_driver column
+    """
+    # Ensure all sentiment columns exist
+    for sentiment in ['positive', 'negative', 'neutral']:
+        col_name = f'sentiment_{sentiment}'
+        if col_name not in df.columns:
+            df[col_name] = 0
+    
+    # Create a new column that checks if negative sentiment is the highest
+    df['is_negative_driver'] = False
+    
+    # Compare sentiment counts and set flag if negative is highest
+    condition = ((df['sentiment_negative'] > df['sentiment_positive']) & 
+                 (df['sentiment_negative'] > df['sentiment_neutral']))
+    
+    df['is_negative_driver'] = condition
+    
+    return df
 
-def weight_of_influence(df):
-    # Pilih kolom metrik yang akan dinormalisasi
-    metrics = ['viral_score', 'reach_score', 'influence_score', 'total_post']
-    scaler = MinMaxScaler()
+def create_uuid(keyword):
+    # Gunakan namespace standar (ada juga untuk URL, DNS, dll)
+    namespace = uuid.NAMESPACE_DNS
 
-    # Buat copy DataFrame untuk menghindari warning
-    df_normalized = df.copy()
-    df_normalized[metrics] = scaler.fit_transform(df[metrics])
+    return uuid.uuid5(namespace, keyword)
 
-    # 2. Tentukan bobot untuk masing-masing metrik berdasarkan kepentingannya
-    # Misalnya, jika influence_score dianggap lebih penting, beri bobot lebih tinggi
-    weights = {
-        'viral_score': 0.25,
-        'reach_score': 0.20,
-        'influence_score': 0.25,
-        'total_post': 0.30
-    }
-
-    # Pastikan total bobot = 1
-    assert sum(weights.values()) == 1.0, "Total bobot harus 1.0"
-
-    # 3. Hitung skor pengaruh berdasarkan bobot
-    df_normalized['weighted_influence'] = (
-        df_normalized['viral_score'] * weights['viral_score'] +
-        df_normalized['reach_score'] * weights['reach_score'] +
-        df_normalized['influence_score'] * weights['influence_score'] +
-        df_normalized['total_post'] * weights['total_post']
+def generate_kol(MAIN_TOPIC,KEYWORDS, START_DATE, END_DATE, SAVE_PATH):
+    # Mendapatkan mentions dengan filter
+    result = get_filtered_mentions(
+        keywords=KEYWORDS,
+        start_date=START_DATE,
+        end_date=END_DATE,
+        source=["issue","user_connections","user_followers","user_influence_score",
+                     'user_image_url',"engagement_rate",
+                 "influence_score","reach_score", "viral_score",
+                 "sentiment", "link_post","user_category","username",'channel'],
+        sort_type='popular',
+        page=1,
+        page_size=1000
     )
 
-    # 4. Tambahkan skor terbobot ke DataFrame asli
-    df['weighted_influence'] = df_normalized['weighted_influence']
 
-    # 5. Urutkan berdasarkan skor pengaruh terbobot (dari tertinggi ke terendah)
-    top_influencers = df.sort_values('weighted_influence', ascending=False)
-    return top_influencers
+    kol = pd.DataFrame(result['data'])
+    print(kol.shape)
 
-def generate_kol(TOPIC,ALL_FILTER, SAVE_PATH = 'PPT'):
-    query = f"""SELECT 
-         a.channel,
-        case when a.channel='news' then CONCAT(SPLIT(a.link_post, '/')[OFFSET(0)], '//', SPLIT(a.link_post, '/')[SAFE_OFFSET(2)])
-        else coalesce(username,REGEXP_EXTRACT(c.link_post, r'(@[^/]+)')) end AS username,
-        c.link_post,  -- Tambahkan identifier untuk post
-        c.issue,
-        a.post_created_at,  -- Tambahkan untuk pengurutan
-        sum(a.viral_score) viral_score,  -- Tambahkan untuk pengurutan
-        sum(a.reach_score) reach_score,
-        sum(a.influence_score) influence_score,
-        COUNT(*) AS total_post,
-        ROUND(100 * SUM(CASE WHEN sentiment = 'negative' THEN 1 ELSE 0 END) / COUNT(*), 2) AS percentage_negative,
-        ROUND(100 * SUM(CASE WHEN sentiment = 'positive' THEN 1 ELSE 0 END) / COUNT(*), 2) AS percentage_positive,
-        ROUND(100 * SUM(CASE WHEN sentiment = 'neutral' THEN 1 ELSE 0 END) / COUNT(*), 2) AS percentage_neutral,
-        SUM(CASE WHEN sentiment = 'negative' THEN 1 ELSE 0 END) AS total_negative,  -- Total negative sentiment
-        SUM(CASE WHEN sentiment = 'positive' THEN 1 ELSE 0 END) AS total_positive,  -- Total positive sentiment
-        SUM(CASE WHEN sentiment = 'neutral' THEN 1 ELSE 0 END) AS total_neutral  -- Total neutral sentiment
-      FROM 
-        medsos.post_category c 
-      JOIN 
-        medsos.post_analysis a
-      ON 
-        c.link_post = a.link_post
-      WHERE 
-         {ALL_FILTER}
-        AND LOWER(issue) NOT IN ('not specified','no caption','n/a','no caption provided')
-      GROUP BY 
-        1, 2, 3, 4 ,5
-        """
+    print('set metrics')
+    for i in set(['user_influence_score','user_followers']) - set(kol):
+        kol[i] = 0
 
-    data = BQ.to_pull_data(query)
+    if 'user_category' not in kol:
+        kol['user_category'] = 'News Account'
 
-    data['username'] = data.apply(lambda s: get_new_name(s['username']) if s['channel']=='news' else s['username'], axis=1)
+    kol[['user_influence_score','user_followers']] = kol[['user_influence_score','user_followers']].fillna(0)
+    kol['user_category'] = kol['user_category'].fillna('')
 
-    data_agg = data.groupby(['channel','username']).agg({"viral_score":"sum",'reach_score':'sum',
-                                                         'influence_score':'mean',
-                                              'total_post':'sum','total_negative':'sum',
-                                              'total_positive':'sum','total_neutral':'sum',
-                                             'issue':lambda s: list(set(s))}).reset_index()
+    kol['link_user'] = kol.apply(lambda s: create_link_user(s), axis=1)        
 
-    data_popular = weight_of_influence(data_agg)
+    for i in set(['user_connections','user_followers']) - set(kol):
+        kol[i] = 0
+
+    kol['user_followers'] = kol['user_connections']+kol['user_followers']
+
+    # Your groupby with sentiment pivot
+    agg_kol = kol.groupby(['link_user']).agg({
+        'link_post': 'size',
+        'viral_score': 'sum',
+        'reach_score': 'sum',
+        'channel': 'max',
+        'username': 'max',
+        'user_image_url':'max',
+        'user_followers':'max',
+        "engagement_rate":'sum',
+        'issue': lambda s: list(set(s)),
+        'user_category': 'max',
+        'user_influence_score': lambda s: max(s)*100,
+        'influence_score':'sum'
+    })
+
+    # Get sentiment counts per link_user using crosstab
+    sentiment_counts = pd.crosstab(kol['link_user'], kol['sentiment'])
+
+    # Rename columns to add 'sentiment_' prefix
+    sentiment_counts = sentiment_counts.add_prefix('total_')
+
+    # Join the sentiment counts with the main result
+    final_kol = agg_kol.join(sentiment_counts).rename(columns = {'link_post':'total_post'})
+
+    # If any sentiment category is missing, add it with zeros
+    for sentiment in ['positive', 'negative', 'neutral']:
+        col_name = f'total_{sentiment}'
+        if col_name not in final_kol.columns:
+            final_kol[col_name] = 0        
+
+
+    # Apply the function to final_kol
+    final_kol = add_negative_driver_flag(final_kol).reset_index()
+
+
+    final_kol['most_viral'] = (final_kol['viral_score'] + final_kol['reach_score']) * \
+              np.log(final_kol['user_followers'] + 1.1) * np.log(final_kol['total_post'] + 1.1)* \
+              (final_kol['user_influence_score'] + 1.1)
 
 
     prompt = f"""You are a Social Media Analyst Expert. Your task is to analyze and group similar issues together based on their meaning, then generate a concise and meaningful description based on the provided post captions.
 
-    Topics yang sedang di analisis adalah terkait [{TOPIC}]
+    Topics yang sedang di analisis adalah terkait [{MAIN_TOPIC}]
 
     ### Instructions:
     1. For each username, analyze their issues and **group similar issues** into multiple **unified issue categories**.
@@ -103,7 +142,7 @@ def generate_kol(TOPIC,ALL_FILTER, SAVE_PATH = 'PPT'):
     4. Remove from analysis if you found that the post is not related to the Topic
 
     ### Data:
-    {data_popular[data_popular['channel']!='news'][['username','channel','issue']][:100].to_dict(orient = 'records')}
+    {final_kol[final_kol['channel']!='news'].sort_values('most_viral', ascending = False)[['username','channel','issue']][:100].to_dict(orient = 'records')}
 
     ### Output Format (JSON):
     [
@@ -143,30 +182,11 @@ def generate_kol(TOPIC,ALL_FILTER, SAVE_PATH = 'PPT'):
                 dp.append(eval(i))
             except:
                 pass
-        df_prediction = pd.DataFrame(dp)    
+        df_prediction = pd.DataFrame(dp)  
+
+
+    result = final_kol.merge(df_prediction, on = ['username','channel']).sort_values('viral_score')
     
-    
-    
-    result = data_agg.merge(df_prediction, on = ['username','channel']).sort_values('viral_score')
-
-    query = f"""select a.username, a.channel,  coalesce(followings,0) followings, 
-    user_image_url,
-    case when a.channel = 'linkedin' then connections else
-    coalesce(followers,followers_last) end followers,
-    coalesce(c.category,'-') user_category
-
-    from medsos.user_analysis a
-    left join medsos.user_category c
-    on a.link_user = c.link_user
-    where a.username in {tuple(result['username'].to_list())}
-    """
-    user = BQ.to_pull_data(query)
-
-    kol_sosmed = result.merge(user, on = ['username','channel'], how='left')
-
-    kol_sosmed[['followings','followers']] = kol_sosmed[['followings','followers']].fillna(0)
-    kol_sosmed = kol_sosmed.fillna('')
-
     with open(os.path.join(SAVE_PATH,'kol.json'),'w') as f:
-        for i in kol_sosmed.to_dict(orient = 'records'):
+        for i in result.to_dict(orient = 'records'):
             f.write(json.dumps(i)+'\n')

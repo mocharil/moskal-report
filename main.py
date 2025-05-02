@@ -7,6 +7,7 @@ from report_generator.slider import *
 from utils.functions import format_range_date, upload_and_get_public_url
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.responses import FileResponse, JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
 import subprocess
 from pathlib import Path
 import shutil
@@ -21,6 +22,15 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="PPT Generator API")
+
+# Configure CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Allows all origins
+    allow_credentials=True,
+    allow_methods=["*"],  # Allows all methods
+    allow_headers=["*"],  # Allows all headers
+)
 
 def create_ppt(prs, topic, RANGE_DATE, SAVE_FILE, SAVE_PATH):
     slide_cover(prs, topic, RANGE_DATE, SAVE_FILE)
@@ -44,6 +54,8 @@ def create_ppt(prs, topic, RANGE_DATE, SAVE_FILE, SAVE_PATH):
     slide_popular_mentions(prs, topic, RANGE_DATE, SAVE_FILE, page_number=11, SOURCE=SAVE_PATH)
     logger.info("Creating slide 12: Recommendations...")
     slide_recommendations(prs, topic, RANGE_DATE, SAVE_FILE, page_number=12, SOURCE=SAVE_PATH)
+    logger.info("Creating slide 13: Executive summary...")
+    slide_executive_summary(prs, topic, RANGE_DATE, SAVE_FILE, page_number=13, SOURCE=SAVE_PATH)
 
 def generate_filename(topic: str, start_date: str, end_date: str, ext: str = "pptx") -> str:
     # Lowercase dan ganti spasi dengan underscore
@@ -54,12 +66,25 @@ def generate_filename(topic: str, start_date: str, end_date: str, ext: str = "pp
     filename = f"{cleaned_topic}_{start_date}_to_{end_date}.{ext}"
     return filename
 
-@app.get("/")
-def read_root():
-    return {"message": "PPT Generator API is running"}
-
 @app.post("/generate-report")
-async def generate_report(topic: str, start_date: str, end_date: str, email_receiver: Optional[str] = None):
+def generate_report(
+    topic: str,
+    start_date: str,
+    end_date: str,
+    sub_keyword: Optional[str] = "",
+    email_receiver: Optional[str] = None
+):
+
+    print("####################################################")
+    print(f"""
+    start date: {start_date}
+    end date: {end_date}
+    topic: {topic}
+    sub_keyword: {sub_keyword}
+    email_receiver: {email_receiver}
+    """)
+    print("####################################################")
+
     start_time = time.time()
     logger.info(f"Starting report generation for topic: {topic}")
     # try:
@@ -91,8 +116,13 @@ async def generate_report(topic: str, start_date: str, end_date: str, email_rece
         os.makedirs(SAVE_PATH)
 
     logger.info("Generating keywords and filters...")
-    KEYWORDS = generate_keywords(topic, f"{start_date} - {end_date}")
-    print(KEYWORDS)
+
+    # Parse sub_keyword string into list
+    KEYWORDS = [k.strip() for k in sub_keyword.split(",") if k.strip()] if sub_keyword else []
+    KEYWORDS.append(topic)
+
+    print('KEYWORD',KEYWORDS)
+
     FILTER_KEYWORD = []
     for key in KEYWORDS:
         keyword = re.sub(f"[^a-z0-9\s]", " ", key.lower().strip(" -"))
@@ -108,48 +138,58 @@ async def generate_report(topic: str, start_date: str, end_date: str, email_rece
     
     logger.info("1/9: Generating metrics chart...")
     from chart_generator.metrics import generate_metrics_chart
-    generate_metrics_chart(ALL_FILTER, FILTER_KEYWORD, FILTER_DATE,
-                        start_date, end_date, prev_start_date, prev_end_date, SAVE_PATH)
+    #migrate done
+    generate_metrics_chart(KEYWORDS, start_date, 
+                           end_date, prev_start_date, prev_end_date, SAVE_PATH)
+
 
     logger.info("2/9: Generating topic overview...")
     from chart_generator.topics import generate_topic_overview
-    generate_topic_overview(ALL_FILTER, topic, SAVE_PATH)
+    generate_topic_overview(topic, KEYWORDS, start_date, end_date, SAVE_PATH)
 
     logger.info("3/9: Generating KOL analysis...")
     from chart_generator.kol import generate_kol
-    generate_kol(topic, ALL_FILTER, SAVE_PATH)
+    generate_kol(topic,KEYWORDS, start_date, end_date, SAVE_PATH)
+    
 
     logger.info("4/9: Generating presence score...")
     from chart_generator.presence_score import generatre_presence_score
-    generatre_presence_score(topic, ALL_FILTER, FILTER_KEYWORD, SAVE_PATH)
-
+    generatre_presence_score(topic, KEYWORDS, start_date, end_date, SAVE_PATH)
+    
     logger.info("5/9: Generating object analysis...")
     from chart_generator.object import generate_object
-    generate_object(ALL_FILTER, SAVE_PATH)
+    generate_object(KEYWORDS, start_date, end_date, limit=10, SAVE_PATH=SAVE_PATH)
 
     logger.info("6/9: Generating context analysis...")
     from chart_generator.context import generate_context
-    generate_context(ALL_FILTER, SAVE_PATH)
+    generate_context( KEYWORDS, start_date, end_date, SAVE_PATH)
 
     logger.info("7/9: Generating sentiment analysis...")
     from chart_generator.sentiment import generate_sentiment_analysis
-    generate_sentiment_analysis(topic, ALL_FILTER, SAVE_PATH)
+    generate_sentiment_analysis(topic,KEYWORDS,start_date,end_date, SAVE_PATH)
 
     logger.info("8/9: Generating popular mentions...")
     from chart_generator.mentions import generate_popular_mentions
-    generate_popular_mentions(ALL_FILTER, SAVE_PATH)
+    generate_popular_mentions(KEYWORDS,start_date,end_date, SAVE_PATH)
 
     logger.info("9/9: Generating recommendations...")
     from chart_generator.recommendations import generate_recommendations
-    generate_recommendations(topic, start_date, end_date, ALL_FILTER, SAVE_PATH)
+    generate_recommendations(topic,start_date, end_date, SAVE_PATH)
+
+    logger.info("10/10: Generating summary...")
+    from chart_generator.exsum import generate_executive_summary
+    summary = generate_executive_summary(topic, start_date, end_date,SAVE_PATH)
+
 
     logger.info("Starting PowerPoint generation...")
     RANGE_DATE = format_range_date(start_date, end_date)
 
+
+
+
+
     FILENAME = generate_filename(topic, start_date, end_date, ext = "pptx")
     SAVE_FILE = os.path.join(SAVE_PATH, FILENAME)
-    
-
 
     prs = Presentation()
 
@@ -201,28 +241,20 @@ async def generate_report(topic: str, start_date: str, end_date: str, email_rece
     #     logger.error(f"Error during report generation: {str(e)}")
     #     raise HTTPException(status_code=500, detail=str(e))
 
-
-@app.post("/test")
-async def teste(topic: str, start_date: str, end_date: str):
-
-        SAVE_FILE = "C://Users//Aril Indra Permana//Moskal Project//report//REPORT//megawati//2025-01-01 - 2025-03-01//report.pptx"
-        FILE_PDF = SAVE_FILE.replace(".pptx", ".pdf")
-        print(convert_to_pdf(SAVE_FILE, FILE_PDF))
-
-        return JSONResponse(
-            content={
-                "status": "success",
-                "message": "Report generated successfully",
-                "data": {
-                    "report_path": SAVE_FILE,
-                    "topic": topic,
-                    "start_date": start_date,
-                    "end_date": end_date,
-                    "pdf_file":FILE_PDF
-                }
-            },
-            status_code=200
-        )           
+@app.post("/generate-sub-keywords")
+def generate_keyword(topic: str = None):
+    if not topic:
+        raise HTTPException(status_code=400, detail="Topic parameter is required")
+    KEYWORDS = generate_keywords(topic)
+    return JSONResponse(
+        content={
+            "status": "success",
+            "message": "Report generated successfully",
+            "main_keyword":topic,
+            "sub_keyword":KEYWORDS
+        },
+        status_code=200
+    )
 
 
 if __name__ == "__main__":

@@ -1,10 +1,16 @@
+import json
+import pandas as pd
+from datetime import datetime, timedelta
 from chart_generator.functions import *
-
 from dotenv import load_dotenv
+from elasticsearch import Elasticsearch
 
 load_dotenv()  
-BQ = About_BQ(project_id= os.getenv("BQ_PROJECT_ID") ,
-         credentials_loc= os.getenv("BQ_CREDS_LOCATION")  )
+
+es = Elasticsearch(os.getenv('ES_HOST',"http://34.101.178.71:9200/"),
+    basic_auth=(os.getenv("ES_USERNAME","elastic"),os.getenv('ES_PASSWORD',"elasticpassword"))  # Sesuaikan dengan kredensial Anda
+        )
+
 def plot_donut_score(score, title="How much attention\na topic or figure gets", save_path=None):
     """
     Create a donut chart with score (0-100) in the center.
@@ -39,7 +45,6 @@ def plot_donut_score(score, title="How much attention\na topic or figure gets", 
 
     if save_path:
         plt.savefig(save_path, bbox_inches='tight', dpi=150, transparent=True)
-
 
 def plot_presence_score_trend(data, title="Your presence score", save_path=None,
                               show_dots=True, color_theme='#1a73e8'):
@@ -101,128 +106,388 @@ def plot_presence_score_trend(data, title="Your presence score", save_path=None,
     plt.tight_layout()
     if save_path:
         plt.savefig(save_path, bbox_inches='tight', dpi=150, transparent=True)
-
-
-
-def get_data(ALL_FILTER):
-    query = f"""
-    WITH topic_data AS (
-        SELECT 
-            DATE(post_created_at) AS date,
-            COUNT(*) AS total_mentions,
-            SUM(reach_score) AS total_reach,
-            SUM(COALESCE(likes, 0) + COALESCE(shares, 0) + COALESCE(comments, 0) + COALESCE(favorites, 0)
-                    + COALESCE(views, 0) + COALESCE(retweets, 0) + COALESCE(replies, 0) 
-                    + COALESCE(reposts, 0) + COALESCE(votes, 0)) AS total_engagement
-        FROM medsos.post_analysis a
-    where {ALL_FILTER}
-        GROUP BY 1
-    ),
-    max_values AS (
-        SELECT 
-            MAX(total_mentions) AS max_mentions,
-            MAX(total_reach) AS max_reach,
-            MAX(total_engagement) AS max_engagement
-        FROM topic_data
-    ),
-    presence_score_calc AS (
-        SELECT 
-            t.date,
-            t.total_mentions,
-            t.total_reach,
-            t.total_engagement,
-            ROUND(
-                ((t.total_mentions / NULLIF(m.max_mentions, 0)) * 40) +
-                ((t.total_reach / NULLIF(m.max_reach, 0)) * 40) +
-                ((t.total_engagement / NULLIF(m.max_engagement, 0)) * 20), 2
-            ) AS presence_score
-        FROM topic_data t
-        CROSS JOIN max_values m
-    )
-    SELECT 
-        date,
-        presence_score
-    FROM presence_score_calc
-    ORDER BY date ASC;
-
+        
+def get_data(KEYWORDS, START_DATE, END_DATE):
     """
-    presence_score = BQ.to_pull_data(query)
+    Menghitung presence score dari data Elasticsearch menggunakan aggregation.
+    
+    Parameters:
+    -----------
+    KEYWORDS : List[str]
+        Daftar keyword untuk filter
+    START_DATE : str
+        Tanggal awal periode (YYYY-MM-DD)
+    END_DATE : str
+        Tanggal akhir periode (YYYY-MM-DD)
+        
+    Returns:
+    --------
+    pd.DataFrame
+        DataFrame dengan kolom date dan presence_score
+    """
 
-    presence_score['date'] = presence_score['date'].astype(str)
+    # Definisikan semua channel dan indeks
+    default_channels = ['reddit', 'youtube', 'linkedin', 'twitter', 
+                        'tiktok', 'instagram', 'facebook', 'news', 'threads']
+    indices = [f"{ch}_data" for ch in default_channels]
+    
+    # Build keyword filter 
+    keyword_conditions = []
+    for kw in KEYWORDS:
+        keyword_conditions.append({"match": {"post_caption": {"query": kw, "operator": "AND"}}})
+        keyword_conditions.append({"match": {"issue": {"query": kw, "operator": "AND"}}})
+    
+    keyword_filter = {
+        "bool": {
+            "should": keyword_conditions,
+            "minimum_should_match": 1
+        }
+    }
+    
+    # Bangun query dengan date_histogram aggregation
+    # untuk mendapatkan total_mentions, total_reach, dan total_engagement per hari
+    query = {
+        "size": 0,
+        "query": {
+            "bool": {
+                "must": [
+                    {
+                        "range": {
+                            "post_created_at": {
+                                "gte": START_DATE,
+                                "lte": END_DATE
+                            }
+                        }
+                    },
+                    keyword_filter
+                ]
+            }
+        },
+        "aggs": {
+            "data_per_day": {
+                "date_histogram": {
+                    "field": "post_created_at",
+                    "calendar_interval": "day",
+                    "format": "yyyy-MM-dd",
+                    "min_doc_count": 0,
+                    "extended_bounds": {
+                        "min": START_DATE,
+                        "max": END_DATE
+                    }
+                },
+                "aggs": {
+                    "total_reach": {
+                        "sum": {
+                            "field": "reach_score"
+                        }
+                    },
+                    "total_engagement": {
+                        "sum": {
+                            "script": {
+                                "source": """
+                                    def likes = doc.containsKey('likes') && !doc['likes'].empty ? doc['likes'].value : 0;
+                                    def shares = doc.containsKey('shares') && !doc['shares'].empty ? doc['shares'].value : 0;
+                                    def comments = doc.containsKey('comments') && !doc['comments'].empty ? doc['comments'].value : 0;
+                                    def favorites = doc.containsKey('favorites') && !doc['favorites'].empty ? doc['favorites'].value : 0;
+                                    def views = doc.containsKey('views') && !doc['views'].empty ? doc['views'].value : 0;
+                                    def retweets = doc.containsKey('retweets') && !doc['retweets'].empty ? doc['retweets'].value : 0;
+                                    def replies = doc.containsKey('replies') && !doc['replies'].empty ? doc['replies'].value : 0;
+                                    def reposts = doc.containsKey('reposts') && !doc['reposts'].empty ? doc['reposts'].value : 0;
+                                    def votes = doc.containsKey('votes') && !doc['votes'].empty ? doc['votes'].value : 0;
+                                    
+                                    return likes + shares + comments + favorites + views + retweets + replies + reposts + votes;
+                                """
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    # Execute query
+    response = es.search(
+        index=",".join(indices),
+        body=query
+    )
+    
+    # Ekstrak data dari respons
+    buckets = response["aggregations"]["data_per_day"]["buckets"]
+    
+    # Siapkan data untuk DataFrame
+    topic_data = []
+    for bucket in buckets:
+        date = bucket["key_as_string"]
+        total_mentions = bucket["doc_count"]
+        total_reach = bucket["total_reach"]["value"]
+        total_engagement = bucket["total_engagement"]["value"]
+        
+        topic_data.append({
+            "date": date,
+            "total_mentions": total_mentions,
+            "total_reach": total_reach,
+            "total_engagement": total_engagement
+        })
+    
+    # Konversi ke DataFrame
+    df_topic_data = pd.DataFrame(topic_data)
+    
+    # Jika tidak ada data, kembalikan DataFrame kosong
+    if df_topic_data.empty:
+        return pd.DataFrame(columns=["date", "presence_score"])
+    
+    # Hitung nilai maksimum
+    max_mentions = df_topic_data["total_mentions"].max()
+    max_reach = df_topic_data["total_reach"].max()
+    max_engagement = df_topic_data["total_engagement"].max()
+    
+    # Hitung presence_score
+    df_topic_data["presence_score"] = df_topic_data.apply(
+        lambda row: round(
+            ((row["total_mentions"] / max_mentions if max_mentions else 0) * 40) +
+            ((row["total_reach"] / max_reach if max_reach else 0) * 40) +
+            ((row["total_engagement"] / max_engagement if max_engagement else 0) * 20),
+            2
+        ),
+        axis=1
+    )
+    
+    # Pilih kolom yang diperlukan dan urutkan berdasarkan tanggal
+    result_df = df_topic_data[["date", "presence_score"]].sort_values(by="date")
+    
+    # Pastikan date dalam format string
+    result_df["date"] = result_df["date"].astype(str)
+    
+    return result_df
 
-    return presence_score
+def get_metrics_and_posts(FILTER_KEYWORD, high_presence_date):
+    """
+    Mendapatkan aggregate dari sentiment per channel dan sampling data post
+    menggunakan satu query Elasticsearch untuk efisiensi.
+    
+    Parameters:
+    -----------
+    FILTER_KEYWORD : List[str]
+        Daftar keyword untuk filter
+    high_presence_date : str
+        Tanggal dengan presence tinggi yang akan dianalisis (YYYY-MM-DD)
+        
+    Returns:
+    --------
+    pd.DataFrame
+        DataFrame gabungan yang berisi metrics dan posts
+    """
+
+    
+    # Definisikan semua channel dan indeks
+    default_channels = ['reddit', 'youtube', 'linkedin', 'twitter', 
+                        'tiktok', 'instagram', 'facebook', 'news', 'threads']
+    indices = [f"{ch}_data" for ch in default_channels]
+    
+    # Format tanggal untuk query
+    start_datetime = f"{high_presence_date} 00:00:00"
+    end_datetime = f"{high_presence_date} 23:59:59"
+    
+    # Build keyword filter 
+    keyword_conditions = []
+    for kw in FILTER_KEYWORD:
+        keyword_conditions.append({"match": {"post_caption": {"query": kw, "operator": "AND"}}})
+        keyword_conditions.append({"match": {"issue": {"query": kw, "operator": "AND"}}})
+    
+    keyword_filter = {
+        "bool": {
+            "should": keyword_conditions,
+            "minimum_should_match": 1
+        }
+    }
+    
+    # === QUERY 1: Metrics Data ===
+    # Query untuk mendapatkan aggregate dari sentiment per channel
+    metrics_query = {
+        "size": 0,
+        "query": {
+            "bool": {
+                "must": [
+                    {
+                        "range": {
+                            "post_created_at": {
+                                "gte": start_datetime,
+                                "lte": end_datetime
+                            }
+                        }
+                    },
+                    keyword_filter
+                ]
+            }
+        },
+        "aggs": {
+            "sentiment_channel": {
+                "terms": {
+                    "field": "sentiment",
+                    "size": 10  # Jumlah sentiment teratas
+                },
+                "aggs": {
+                    "channels": {
+                        "terms": {
+                            "field": "channel",
+                            "size": 20  # Jumlah channel teratas
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    # === QUERY 2: Posts Data ===
+    # Query untuk mendapatkan sampling data post
+    posts_query = {
+        "size": 100,  # Limit 100 post teratas
+        "query": {
+            "bool": {
+                "must": [
+                    {
+                        "range": {
+                            "post_created_at": {
+                                "gte": start_datetime,
+                                "lte": end_datetime
+                            }
+                        }
+                    },
+                    keyword_filter
+                ],
+                "must_not": [
+                    {
+                        "terms": {
+                            "issue.keyword": ["not specified", "Not Specified", "NOT SPECIFIED"]
+                        }
+                    }
+                ]
+            }
+        },
+        "_source": [
+            "post_caption", "channel", "issue", "sentiment", "reach_score", 
+            "viral_score", "likes", "shares", "comments", "favorites", 
+            "views", "retweets", "replies", "reposts", "votes", "link_post"
+        ],
+        "sort": [
+            {
+                "_script": {
+                    "type": "number",
+                    "script": {
+                        "source": """
+                            def reach = doc.containsKey('reach_score') && !doc['reach_score'].empty ? doc['reach_score'].value : 0;
+                            def viral = doc.containsKey('viral_score') && !doc['viral_score'].empty ? doc['viral_score'].value : 0;
+                            def likes = doc.containsKey('likes') && !doc['likes'].empty ? doc['likes'].value : 0;
+                            def shares = doc.containsKey('shares') && !doc['shares'].empty ? doc['shares'].value : 0;
+                            def comments = doc.containsKey('comments') && !doc['comments'].empty ? doc['comments'].value : 0;
+                            def favorites = doc.containsKey('favorites') && !doc['favorites'].empty ? doc['favorites'].value : 0;
+                            def views = doc.containsKey('views') && !doc['views'].empty ? doc['views'].value : 0;
+                            def retweets = doc.containsKey('retweets') && !doc['retweets'].empty ? doc['retweets'].value : 0;
+                            def replies = doc.containsKey('replies') && !doc['replies'].empty ? doc['replies'].value : 0;
+                            def reposts = doc.containsKey('reposts') && !doc['reposts'].empty ? doc['reposts'].value : 0;
+                            def votes = doc.containsKey('votes') && !doc['votes'].empty ? doc['votes'].value : 0;
+                            
+                            def engagement = likes + shares + comments + favorites + views + retweets + replies + reposts + votes;
+                            
+                            return reach + viral + engagement;
+                        """
+                    },
+                    "order": "desc"
+                }
+            }
+        ]
+    }
+    
+    # Execute kedua query secara terpisah
+    metrics_response = es.search(
+        index=",".join(indices),
+        body=metrics_query
+    )
+    
+    posts_response = es.search(
+        index=",".join(indices),
+        body=posts_query
+    )
+    
+    # Proses results untuk metrics_data
+    metrics_data = []
+    sentiment_buckets = metrics_response["aggregations"]["sentiment_channel"]["buckets"]
+    
+    for sentiment_bucket in sentiment_buckets:
+        sentiment = sentiment_bucket["key"]
+        channel_buckets = sentiment_bucket["channels"]["buckets"]
+        
+        for channel_bucket in channel_buckets:
+            channel = channel_bucket["key"]
+            total_mentions = channel_bucket["doc_count"]
+            
+            metrics_data.append({
+                "data_type": "metrics",
+                "sentiment": sentiment,
+                "channel": channel,
+                "total_mentions": total_mentions,
+                "post_caption": None,
+                "issue": None,
+                "reach_score": None,
+                "viral_score": None,
+                "engagement": None,
+                "link_post": None
+            })
+    
+    # Proses results untuk posts_data
+    posts_data = []
+    post_hits = posts_response["hits"]["hits"]
+    
+    for hit in post_hits:
+        source = hit["_source"]
+        
+        # Hitung total engagement
+        engagement = sum([
+            source.get("likes", 0) or 0,
+            source.get("shares", 0) or 0,
+            source.get("comments", 0) or 0,
+            source.get("favorites", 0) or 0,
+            source.get("views", 0) or 0,
+            source.get("retweets", 0) or 0,
+            source.get("replies", 0) or 0,
+            source.get("reposts", 0) or 0,
+            source.get("votes", 0) or 0
+        ])
+        
+        posts_data.append({
+            "data_type": "posts",
+            "sentiment": source.get("sentiment", ""),
+            "channel": source.get("channel", ""),
+            "total_mentions": None,
+            "post_caption": source.get("post_caption", ""),
+            "issue": source.get("issue", ""),
+            "reach_score": source.get("reach_score", 0),
+            "viral_score": source.get("viral_score", 0),
+            "engagement": engagement,
+            "link_post": source.get("link_post", "")
+        })
+    
+    # Gabungkan kedua hasil
+    combined_data = metrics_data + posts_data
+    
+    # Konversi ke DataFrame
+    df = pd.DataFrame(combined_data)
+    
+    # Urutkan hasil
+    df = df.sort_values(
+        by=["data_type", "reach_score", "viral_score", "engagement"],
+        ascending=[True, False, False, False],
+        na_position='last'
+    )
+    
+    return df
 
 def presence_description(TOPIC, FILTER_KEYWORD, high_presence_date,SAVE_PATH):
     
-    query = f"""
-    WITH 
-    metric_data AS (
-        SELECT 
-            sentiment, 
-            a.channel, 
-            COUNT(*) AS total_mentions
-        FROM medsos.post_analysis a
-        JOIN medsos.post_category c
-        ON a.link_post = c.link_post
-        WHERE {FILTER_KEYWORD}
-        AND a.post_created_at BETWEEN '{high_presence_date} 00:00:00' AND '{high_presence_date} 29:59:59'
-        GROUP BY 1, 2
-    ),
-    post_data AS (
-        SELECT * from (select
-            a.post_caption, 
-            a.channel, 
-            c.issue, 
-            sentiment,
-            reach_score, 
-            viral_score, 
-            (COALESCE(likes, 0) + COALESCE(shares, 0) + COALESCE(comments, 0) + COALESCE(favorites, 0)
-             + COALESCE(views, 0) + COALESCE(retweets, 0) + COALESCE(replies, 0) 
-             + COALESCE(reposts, 0) + COALESCE(votes, 0)) AS engagement,
-            a.link_post
-        FROM medsos.post_analysis a
-        JOIN medsos.post_category c
-        ON a.link_post = c.link_post
-        WHERE {FILTER_KEYWORD}
-        AND a.post_created_at BETWEEN '{high_presence_date} 00:00:00' AND '{high_presence_date} 29:59:59'
-        AND LOWER(c.issue) NOT IN ('not specified'))
-        order by (reach_score + viral_score + engagement) desc
-        limit 100
+    combined_results = get_metrics_and_posts(
+        FILTER_KEYWORD=FILTER_KEYWORD,
+        high_presence_date=high_presence_date
     )
-    -- Gabungkan hasil dari kedua CTE dengan UNION ALL
-    SELECT 
-        'metrics' AS data_type,
-        sentiment,
-        channel,
-        total_mentions,
-        NULL AS post_caption,
-        NULL AS issue,
-        NULL AS reach_score,
-        NULL AS viral_score,
-        NULL AS engagement,
-        NULL AS link_post
-    FROM metric_data
-
-    UNION ALL
-
-    SELECT 
-        'posts' AS data_type,
-        sentiment,
-        channel,
-        NULL AS total_mentions,
-        post_caption,
-        issue,
-        reach_score,
-        viral_score,
-        engagement,
-        link_post
-    FROM post_data
-    ORDER BY data_type, 
-        CASE WHEN data_type = 'posts' THEN (reach_score + viral_score + engagement) END DESC
-    """
-
-    # Eksekusi query gabungan
-    combined_results = BQ.to_pull_data(query)
 
     # Pisahkan hasil berdasarkan data_type
     metric_presence = combined_results[combined_results['data_type'] == 'metrics']
@@ -252,10 +517,10 @@ def presence_description(TOPIC, FILTER_KEYWORD, high_presence_date,SAVE_PATH):
 
     with open(os.path.join(SAVE_PATH,'presence_score_analysis.json'),'w') as f:
         json.dump({'analysis':summarize},f)
-        
-def generatre_presence_score(TOPIC, ALL_FILTER, FILTER_KEYWORD, SAVE_PATH):
+   
+def generatre_presence_score(TOPIC, KEYWORDS, START_DATE, END_DATE, SAVE_PATH):
     
-    presence_score = get_data(ALL_FILTER)
+    presence_score = get_data(KEYWORDS, START_DATE, END_DATE)
     
     plot_donut_score(presence_score['presence_score'].mean(),
                      save_path = os.path.join(SAVE_PATH,'presence_score_donut.png'))
@@ -265,4 +530,4 @@ def generatre_presence_score(TOPIC, ALL_FILTER, FILTER_KEYWORD, SAVE_PATH):
     
     high_presence_date = presence_score.sort_values('presence_score', ascending = False)['date'].to_list()[0]
     
-    presence_description(TOPIC, FILTER_KEYWORD, high_presence_date, SAVE_PATH)
+    presence_description(TOPIC, KEYWORDS, high_presence_date, SAVE_PATH)

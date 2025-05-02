@@ -1,10 +1,16 @@
+import json
+import pandas as pd
+from datetime import datetime, timedelta
 from chart_generator.functions import *
 
 from dotenv import load_dotenv
-
+from elasticsearch import Elasticsearch
 load_dotenv()  
-BQ = About_BQ(project_id= os.getenv("BQ_PROJECT_ID") ,
-         credentials_loc= os.getenv("BQ_CREDS_LOCATION")  )
+
+es = Elasticsearch(os.getenv('ES_HOST',"http://34.101.178.71:9200/"),
+    basic_auth=(os.getenv("ES_USERNAME","elastic"),os.getenv('ES_PASSWORD',"elasticpassword"))  # Sesuaikan dengan kredensial Anda
+        )
+
 def create_sentiment_distribution_chart(df, title="Sentiment Distribution by Entity", figsize=(20, 15)):
 
     # Convert to DataFrame and sort by total mentions
@@ -98,45 +104,226 @@ def create_sentiment_distribution_chart(df, title="Sentiment Distribution by Ent
     
     return fig, ax_labels, ax
 
-def generate_object(ALL_FILTER, SAVE_PATH):
-    query = f"""WITH split_objects AS (
-      SELECT 
-        TRIM(LOWER(object_item)) AS object_item,
-        c.sentiment
-      FROM 
-        medsos.post_category c
-      JOIN
-        medsos.post_analysis a
-      ON 
-        c.link_post = a.link_post
-      CROSS JOIN
-        UNNEST(SPLIT(c.object, ',')) AS object_item
-      WHERE 
-    {ALL_FILTER}
-        AND c.object IS NOT NULL
-        AND c.channel not in ('news')
-    )
-    SELECT
-      object_item,
-      COUNT(*) AS total_mentions,
-      COUNTIF(sentiment = 'positive') AS positive_mentions,
-      COUNTIF(sentiment = 'negative') AS negative_mentions,
-      COUNTIF(sentiment = 'neutral') AS neutral_mentions,
-      ROUND(COUNTIF(sentiment = 'positive') / COUNT(*) * 100, 1) AS positive_percentage,
-      ROUND(COUNTIF(sentiment = 'negative') / COUNT(*) * 100, 1) AS negative_percentage,
-      ROUND(COUNTIF(sentiment = 'neutral') / COUNT(*) * 100, 1) AS neutral_percentage
-    FROM 
-      split_objects
-    WHERE 
-      LENGTH(TRIM(object_item)) > 0
-    GROUP BY 
-      object_item
-    ORDER BY 
-      total_mentions DESC
-    LIMIT 
-      10
+def generate_object(KEYWORDS, START_DATE, END_DATE, limit=10, SAVE_PATH=None):
     """
-    df = BQ.to_pull_data(query)
+    Mengambil data sentimen terhadap objek dari Elasticsearch.
+    
+    Parameters:
+    -----------
+    KEYWORDS : List[str]
+        Daftar keyword untuk filter
+    START_DATE : str
+        Tanggal awal periode (YYYY-MM-DD)
+    END_DATE : str
+        Tanggal akhir periode (YYYY-MM-DD)
+    limit : int, optional
+        Jumlah objek yang akan ditampilkan (default: 10)
+        
+    Returns:
+    --------
+    pd.DataFrame
+        DataFrame yang berisi object_item, total_mentions, positive_mentions, 
+        negative_mentions, neutral_mentions, positive_percentage,
+        negative_percentage, dan neutral_percentage
+    """
+
+    
+    # Definisikan channel dan indeks
+    # Exclude channel news seperti di query SQL
+    channels = ['reddit', 'youtube', 'linkedin', 'twitter', 
+               'tiktok', 'instagram', 'facebook', 'threads']
+    indices = [f"{ch}_data" for ch in channels]
+    
+    # Build keyword filter 
+    keyword_conditions = []
+    for kw in KEYWORDS:
+        keyword_conditions.append({"match": {"post_caption": {"query": kw, "operator": "AND"}}})
+        keyword_conditions.append({"match": {"issue": {"query": kw, "operator": "AND"}}})
+    
+    keyword_filter = {
+        "bool": {
+            "should": keyword_conditions,
+            "minimum_should_match": 1
+        }
+    }
+    
+    # Bangun query untuk mengambil data dengan aggregasi
+    # Karena object sudah dalam bentuk list, kita bisa gunakan nested aggregation
+    query = {
+        "size": 0,  # Tidak perlu dokumen, hanya aggregasi
+        "query": {
+            "bool": {
+                "must": [
+                    {
+                        "range": {
+                            "post_created_at": {
+                                "gte": START_DATE,
+                                "lte": END_DATE
+                            }
+                        }
+                    },
+                    keyword_filter,
+                    {
+                        "exists": {
+                            "field": "object"
+                        }
+                    }
+                ],
+                "must_not": [
+                    {
+                        "term": {
+                            "channel": "news"
+                        }
+                    },
+                    {
+                        "term": {
+                            "object": "not specified"
+                        }
+                    }
+                ],
+                "filter": [
+                    {
+                        "terms": {
+                            "sentiment": ["positive", "negative", "neutral"]
+                        }
+                    }
+                ]
+            }
+        },
+        "aggs": {
+            "objects": {
+                "terms": {
+                    "field": "object",
+                    "size": 1000,  # Ambil banyak objek untuk memastikan mendapat yang paling relevan
+                    "order": {"_count": "desc"}
+                },
+                "aggs": {
+                    "sentiment_breakdown": {
+                        "terms": {
+                            "field": "sentiment",
+                            "size": 3  # positive, negative, neutral
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    # Execute query
+    response = es.search(
+        index=",".join(indices),
+        body=query
+    )
+    
+    # Proses hasil aggregasi
+    object_buckets = response["aggregations"]["objects"]["buckets"]
+    
+    # Siapkan data untuk DataFrame
+    data = []
+    
+    for obj_bucket in object_buckets:
+        object_item = obj_bucket["key"].strip().lower()
+        
+        # Skip objek kosong atau "not specified"
+        if not object_item or object_item == "not specified":
+            continue
+        
+        total_mentions = obj_bucket["doc_count"]
+        
+        # Inisialisasi hitungan sentimen
+        positive_mentions = 0
+        negative_mentions = 0
+        neutral_mentions = 0
+        
+        # Ambil breakdown sentimen
+        sentiment_buckets = obj_bucket["sentiment_breakdown"]["buckets"]
+        
+        for sentiment_bucket in sentiment_buckets:
+            sentiment = sentiment_bucket["key"].lower()
+            count = sentiment_bucket["doc_count"]
+            
+            if sentiment == "positive":
+                positive_mentions = count
+            elif sentiment == "negative":
+                negative_mentions = count
+            elif sentiment == "neutral":
+                neutral_mentions = count
+        
+        # Hitung persentase
+        positive_percentage = round((positive_mentions / total_mentions) * 100, 1) if total_mentions > 0 else 0
+        negative_percentage = round((negative_mentions / total_mentions) * 100, 1) if total_mentions > 0 else 0
+        neutral_percentage = round((neutral_mentions / total_mentions) * 100, 1) if total_mentions > 0 else 0
+        
+        data.append({
+            "object_item": object_item,
+            "total_mentions": total_mentions,
+            "positive_mentions": positive_mentions,
+            "negative_mentions": negative_mentions,
+            "neutral_mentions": neutral_mentions,
+            "positive_percentage": positive_percentage,
+            "negative_percentage": negative_percentage,
+            "neutral_percentage": neutral_percentage
+        })
+    
+    # Buat DataFrame
+    df = pd.DataFrame(data)
+    
+    # Jika objek berisi koma, handle seperti dipisahkan
+    # Ini untuk memastikan kompatibilitas jika ada koma dalam objek
+    split_data = []
+    for _, row in df.iterrows():
+        object_items = row["object_item"].split(",")
+        
+        for item in object_items:
+            item = item.strip().lower()
+            if not item or item == "not specified":
+                continue
+                
+            # Tambahkan item baru dengan nilai yang sama
+            split_data.append({
+                "object_item": item,
+                "total_mentions": row["total_mentions"],
+                "positive_mentions": row["positive_mentions"],
+                "negative_mentions": row["negative_mentions"],
+                "neutral_mentions": row["neutral_mentions"],
+                "positive_percentage": row["positive_percentage"],
+                "negative_percentage": row["negative_percentage"],
+                "neutral_percentage": row["neutral_percentage"]
+            })
+    
+    # Jika ada data yang di-split, gunakan itu, jika tidak, gunakan data asli
+    if split_data:
+        df = pd.DataFrame(split_data)
+        
+        # Gabungkan item yang sama
+        df = df.groupby("object_item").agg({
+            "total_mentions": "sum",
+            "positive_mentions": "sum",
+            "negative_mentions": "sum",
+            "neutral_mentions": "sum"
+        }).reset_index()
+        
+        # Hitung ulang persentase
+        df["positive_percentage"] = df.apply(
+            lambda x: round((x["positive_mentions"] / x["total_mentions"]) * 100, 1) if x["total_mentions"] > 0 else 0, 
+            axis=1
+        )
+        df["negative_percentage"] = df.apply(
+            lambda x: round((x["negative_mentions"] / x["total_mentions"]) * 100, 1) if x["total_mentions"] > 0 else 0, 
+            axis=1
+        )
+        df["neutral_percentage"] = df.apply(
+            lambda x: round((x["neutral_mentions"] / x["total_mentions"]) * 100, 1) if x["total_mentions"] > 0 else 0, 
+            axis=1
+        )
+    
+    # Urutkan berdasarkan total mentions (descending) dan ambil top 'limit'
+    df = df.sort_values(by="total_mentions", ascending=False).head(limit)
+    
+
+    df.to_csv(os.path.join(SAVE_PATH, 'sentiment_distribution_by_entity.csv'), index=False)
+
+
     fig, ax_labels, ax  = create_sentiment_distribution_chart(df)
     save_file = os.path.join(SAVE_PATH, 'sentiment_distribution_by_entity.png')
     plt.savefig(save_file, dpi=300, bbox_inches='tight', transparent=True)

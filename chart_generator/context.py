@@ -1,9 +1,171 @@
+import json, os
+import pandas as pd
+from datetime import datetime
+from typing import Dict, List, Literal, Optional, Union
+    
 from chart_generator.functions import *
 from dotenv import load_dotenv
-
+from elasticsearch import Elasticsearch
 load_dotenv()  
-BQ = About_BQ(project_id= os.getenv("BQ_PROJECT_ID") ,
-         credentials_loc= os.getenv("BQ_CREDS_LOCATION")  )
+
+es = Elasticsearch(os.getenv('ES_HOST',"http://34.101.178.71:9200/"),
+    basic_auth=(os.getenv("ES_USERNAME","elastic"),os.getenv('ES_PASSWORD',"elasticpassword"))  # Sesuaikan dengan kredensial Anda
+        )
+
+
+def get_context_data(
+    keywords: List[str],
+    start_date: str,
+    end_date: str,
+    limit=50,
+    kind="word" #word or hashtags
+) -> pd.DataFrame:
+    # Buat koneksi Elasticsearch
+    if kind == 'word':
+        field = 'list_word'
+    else:
+        field = 'post_hashtags'
+        
+    
+    if not es:
+        return pd.DataFrame(columns=["word", "total_mentions", "dominant_sentiment", "dominant_sentiment_count", "dominant_sentiment_percentage"])
+    
+    # Definisikan semua channel yang mungkin
+    default_channels = ['reddit', 'youtube', 'linkedin', 'twitter', 
+                        'tiktok', 'instagram', 'facebook', 'news', 'threads']
+    
+    # Dapatkan indeks yang akan di-query
+    indices = [f"{ch}_data" for ch in default_channels]
+    
+    if not indices:
+        print("Error: No valid indices")
+        return pd.DataFrame(columns=["word", "total_mentions", "dominant_sentiment", "dominant_sentiment_count", "dominant_sentiment_percentage"])
+    
+    # Bangun query untuk mendapatkan trending hashtags
+    must_conditions = [
+        {
+            "range": {
+                "post_created_at": {
+                    "gte": start_date,
+                    "lte": end_date
+                }
+            }
+        },
+        {
+            "exists": {
+                "field": field
+            }
+        }
+    ]
+    
+    # Tambahkan filter keywords jika ada
+    if keywords:
+        # Konversi keywords ke list jika belum
+        keyword_list = keywords if isinstance(keywords, list) else [keywords]
+        keyword_should_conditions = []
+        
+        # Tentukan field yang akan digunakan (tidak case sensitive)
+        caption_field = "post_caption"
+        issue_field = "issue"
+        
+        # Gunakan match dengan operator OR untuk mencari salah satu keyword
+        for kw in keyword_list:
+            keyword_should_conditions.append({"match": {caption_field: {"query": kw, "operator": "AND"}}})
+            keyword_should_conditions.append({"match": {issue_field: {"query": kw, "operator": "AND"}}})
+        
+        keyword_condition = {
+            "bool": {
+                "should": keyword_should_conditions,
+                "minimum_should_match": 1
+            }
+        }
+        must_conditions.append(keyword_condition)
+    
+    # Query untuk mendapatkan wordcloud data
+    query = {
+        "size": 0,
+        "query": {
+            "bool": {
+                "must": must_conditions
+            }
+        },
+        "aggs": {
+            "words": {
+                "terms": {
+                    "field": field,
+                    "size": limit
+                },
+                "aggs": {
+                    "sentiment_breakdown": {
+                        "terms": {
+                            "field": "sentiment",
+                            "size": 3  # positive, negative, neutral
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    try:
+        # Execute query
+        response = es.search(
+            index=",".join(indices),
+            body=query
+        )
+        
+        # Process results
+        word_buckets = response["aggregations"]["words"]["buckets"]
+        
+        # Kumpulkan data word
+        word_data = []
+        
+        for word_bucket in word_buckets:
+            word = word_bucket["key"]
+            mentions = word_bucket["doc_count"]
+            
+            # Analisis sentimen untuk word
+            sentiment_buckets = word_bucket["sentiment_breakdown"]["buckets"]
+            
+            # Initialize sentiment counts
+            sentiment_counts = {
+                "positive": 0,
+                "negative": 0,
+                "neutral": 0
+            }
+            
+            # Count by sentiment
+            for sentiment_bucket in sentiment_buckets:
+                sentiment = sentiment_bucket["key"].lower()
+                count = sentiment_bucket["doc_count"]
+                if sentiment in sentiment_counts:
+                    sentiment_counts[sentiment] = count
+            
+            # Determine dominant sentiment
+            dominant_sentiment = max(sentiment_counts, key=sentiment_counts.get)
+            dominant_sentiment_count = sentiment_counts[dominant_sentiment]
+            
+            # Calculate percentage for dominant sentiment
+            dominant_sentiment_percentage = (dominant_sentiment_count / mentions) * 100 if mentions > 0 else 0
+            
+            word_data.append({
+                kind: word,
+                "total_mentions": mentions,
+                "dominant_sentiment": dominant_sentiment,
+                "dominant_sentiment_count": dominant_sentiment_count,
+                "dominant_sentiment_percentage": round(dominant_sentiment_percentage, 1)
+            })
+        
+        # Reorder based on sort_by parameter if needed
+        word_data.sort(key=lambda x: x["total_mentions"], reverse=True)
+        
+        # Convert to pandas DataFrame
+        df = pd.DataFrame(word_data)
+        return df
+        
+    except Exception as e:
+        print(f"Query failed: {e}")
+        return pd.DataFrame(columns=["word", "total_mentions", "dominant_sentiment", "dominant_sentiment_count", "dominant_sentiment_percentage"])
 
 def create_sentiment_wordcloud(data, width=600, height=350, background_color='white', 
                               max_words=100, figsize=(8, 5), title="Hashtag Word Cloud by Sentiment", word='hashtag'):
@@ -59,94 +221,16 @@ def create_sentiment_wordcloud(data, width=600, height=350, background_color='wh
     plt.tight_layout(pad=0)
     return fig, ax
 
-def context(ALL_FILTER, SAVE_PATH):
-    query = f"""WITH posts_with_sentiment AS (
-            SELECT 
-                a.post_caption,
-                c.sentiment
-            FROM 
-                medsos.post_analysis a
-            JOIN
-                medsos.post_category c
-            ON 
-                a.link_post = c.link_post
-            WHERE 
-                {ALL_FILTER}
-                AND c.sentiment IS NOT NULL
-        ),
-        extracted_hashtags AS (
-            SELECT 
-                REGEXP_EXTRACT_ALL(LOWER(post_caption), r'\w+') AS hashtags,
+def context( KEYWORDS, START_DATE, END_DATE, SAVE_PATH ):
 
-                sentiment
-            FROM posts_with_sentiment
-        ),
-        hashtag_sentiments AS (
-            SELECT 
-                hashtag,
-                sentiment, 
-                COUNT(*) AS sentiment_count
-            FROM 
-                extracted_hashtags,
-                UNNEST(hashtags) AS hashtag
-            GROUP BY 
-                hashtag, sentiment
-        ),
-        hashtag_totals AS (
-            SELECT 
-                hashtag,
-                SUM(sentiment_count) AS total_mentions
-            FROM 
-                hashtag_sentiments
-            GROUP BY 
-                hashtag
-        ),
-        sentiment_percentages AS (
-            SELECT 
-                h.hashtag,
-                h.sentiment,
-                h.sentiment_count,
-                t.total_mentions,
-                ROUND(h.sentiment_count / t.total_mentions * 100, 1) AS percentage
-            FROM 
-                hashtag_sentiments h
-            JOIN 
-                hashtag_totals t
-            ON 
-                h.hashtag = t.hashtag
-        ),
-        dominant_sentiments AS (
-            SELECT 
-                hashtag,
-                total_mentions,
-                ARRAY_AGG(STRUCT(sentiment, sentiment_count, percentage)
-                          ORDER BY sentiment_count DESC 
-                          LIMIT 1)[OFFSET(0)].sentiment AS dominant_sentiment,
-                ARRAY_AGG(STRUCT(sentiment, sentiment_count, percentage)
-                          ORDER BY sentiment_count DESC 
-                          LIMIT 1)[OFFSET(0)].sentiment_count AS dominant_sentiment_count,
-                ARRAY_AGG(STRUCT(sentiment, sentiment_count, percentage)
-                          ORDER BY sentiment_count DESC 
-                          LIMIT 1)[OFFSET(0)].percentage AS dominant_sentiment_percentage
-            FROM 
-                sentiment_percentages
-            GROUP BY 
-                hashtag, total_mentions
-        )
-        SELECT 
-            hashtag word, 
-            total_mentions,
-            dominant_sentiment,
-            dominant_sentiment_count,
-            dominant_sentiment_percentage
-        FROM 
-            dominant_sentiments
-        WHERE LENGTH(hashtag) > 2 
-        ORDER BY 
-            total_mentions DESC
-        LIMIT 700;"""
+    word = get_context_data(
+                keywords=KEYWORDS,
+                start_date=START_DATE,
+                end_date=END_DATE,
+                limit=200,
+                kind = 'word'
+            )
 
-    word = BQ.to_pull_data(query)
 
     list_stopword = []
     if os.path.isfile('utils/stopwords.txt'):
@@ -156,105 +240,39 @@ def context(ALL_FILTER, SAVE_PATH):
          print('TIDAK ADA FILE STOPSOWRDS')
          print(os.getcwd())
 
-    word = word[~word['word'].isin(list_stopword)][:100]
+    word = word[~word['word'].isin(list_stopword)][:50]
 
     fig, ax = create_sentiment_wordcloud(word.to_dict(orient = 'records'), word = 'word')
     save_file = os.path.join(SAVE_PATH, 'word_sentiment_wordcloud.png')
     plt.savefig(save_file, dpi=500, bbox_inches='tight', transparent=True)
 
 
-def hashtags(ALL_FILTER, SAVE_PATH):
-    query = f"""WITH posts_with_sentiment AS (
-            SELECT 
-                a.post_caption,
-                c.sentiment
-            FROM 
-                medsos.post_analysis a
-            JOIN
-                medsos.post_category c
-            ON 
-                a.link_post = c.link_post
-            WHERE 
-                {ALL_FILTER}
-                AND c.sentiment IS NOT NULL
-        ),
-        extracted_hashtags AS (
-            SELECT 
-                REGEXP_EXTRACT_ALL(LOWER(post_caption), r'#\w+') AS hashtags,
-                sentiment
-            FROM posts_with_sentiment
-        ),
-        hashtag_sentiments AS (
-            SELECT 
-                hashtag,
-                sentiment, 
-                COUNT(*) AS sentiment_count
-            FROM 
-                extracted_hashtags,
-                UNNEST(hashtags) AS hashtag
-            GROUP BY 
-                hashtag, sentiment
-        ),
-        hashtag_totals AS (
-            SELECT 
-                hashtag,
-                SUM(sentiment_count) AS total_mentions
-            FROM 
-                hashtag_sentiments
-            GROUP BY 
-                hashtag
-        ),
-        sentiment_percentages AS (
-            SELECT 
-                h.hashtag,
-                h.sentiment,
-                h.sentiment_count,
-                t.total_mentions,
-                ROUND(h.sentiment_count / t.total_mentions * 100, 1) AS percentage
-            FROM 
-                hashtag_sentiments h
-            JOIN 
-                hashtag_totals t
-            ON 
-                h.hashtag = t.hashtag
-        ),
-        dominant_sentiments AS (
-            SELECT 
-                hashtag,
-                total_mentions,
-                ARRAY_AGG(STRUCT(sentiment, sentiment_count, percentage)
-                          ORDER BY sentiment_count DESC 
-                          LIMIT 1)[OFFSET(0)].sentiment AS dominant_sentiment,
-                ARRAY_AGG(STRUCT(sentiment, sentiment_count, percentage)
-                          ORDER BY sentiment_count DESC 
-                          LIMIT 1)[OFFSET(0)].sentiment_count AS dominant_sentiment_count,
-                ARRAY_AGG(STRUCT(sentiment, sentiment_count, percentage)
-                          ORDER BY sentiment_count DESC 
-                          LIMIT 1)[OFFSET(0)].percentage AS dominant_sentiment_percentage
-            FROM 
-                sentiment_percentages
-            GROUP BY 
-                hashtag, total_mentions
-        )
-        SELECT 
-            hashtag, 
-            total_mentions,
-            dominant_sentiment,
-            dominant_sentiment_count,
-            dominant_sentiment_percentage
-        FROM 
-            dominant_sentiments
-        ORDER BY 
-            total_mentions DESC
-        LIMIT 50;"""
+def hashtags( KEYWORDS, START_DATE, END_DATE, SAVE_PATH ):
 
-    hashtags = BQ.to_pull_data(query)
+    hashtags = get_context_data(
+                keywords=KEYWORDS,
+                start_date=START_DATE,
+                end_date=END_DATE,
+                limit=50,
+                kind = 'hashtag'
+            )
 
     fig, ax = create_sentiment_wordcloud(hashtags.to_dict(orient = 'records'), word = 'hashtag')
     save_file = os.path.join(SAVE_PATH,'hashtag_sentiment_wordcloud.png')
     plt.savefig(save_file, dpi=500, bbox_inches='tight', transparent=True)
 
     
-def generate_context(ALL_FILTER, SAVE_PATH):
-    context(ALL_FILTER, SAVE_PATH)
-    hashtags(ALL_FILTER, SAVE_PATH)
+def generate_context( KEYWORDS, START_DATE, END_DATE, SAVE_PATH):
+    import time
+    start_time = time.time()
+    print('word')
+    context(KEYWORDS, START_DATE, END_DATE, SAVE_PATH)
+    end_time = time.time()
+    elapsed = end_time - start_time
+    print('finish',elapsed)
+    start_time = time.time()
+    print('hashtags')
+    hashtags(KEYWORDS, START_DATE, END_DATE, SAVE_PATH)
+    end_time = time.time()
+    elapsed = end_time - start_time
+    print('finish',elapsed)
