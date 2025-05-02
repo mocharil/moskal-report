@@ -198,30 +198,20 @@ def generate_report(
 
     logger.info(f"Upload Success")
 
-        return JSONResponse(
-            content={
-                "status": "success",
-                "message": "Report generated successfully",
-                "data": {
-                    "report_path": SAVE_FILE,
-                    "topic": topic,
-                    "start_date": start_date,
-                    "end_date": end_date,
-                    "url":public_url["signed_url"]
-                }
-            },
-            status_code=200
-        )
-
-    except Exception as e:
-        logger.error(f"Error during report generation: {str(e)}")
-        return JSONResponse(
-            content={
-                "status": "error",
-                "message": str(e)
-            },
-            status_code=500
-        )
+    return JSONResponse(
+        content={
+            "status": "success",
+            "message": "Report generated successfully",
+            "data": {
+                "report_path": SAVE_FILE,
+                "topic": topic,
+                "start_date": start_date,
+                "end_date": end_date,
+                "url":public_url["signed_url"]
+            }
+        },
+        status_code=200
+    )
 
 @app.post("/generate-sub-keywords")
 def generate_keyword(topic: str = None):
