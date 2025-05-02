@@ -3,6 +3,8 @@ from chart_generator.functions import *
 from dotenv import load_dotenv
 from typing import Optional
 from datetime import datetime
+from elasticsearch import Elasticsearch
+
 from report_generator.slider import *
 from utils.functions import format_range_date, upload_and_get_public_url
 from fastapi import FastAPI, UploadFile, File, HTTPException
@@ -13,6 +15,16 @@ from pathlib import Path
 import shutil
 from utils.send_email import send_email
 load_dotenv()
+
+# Configure Elasticsearch
+es = Elasticsearch(
+    os.getenv('ES_HOST', 'http://localhost:9200'),
+    basic_auth=(
+        os.getenv('ES_USER', 'elastic'),
+        os.getenv('ES_PASSWORD', '')
+    )
+)
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -64,7 +76,7 @@ def generate_filename(topic: str, start_date: str, end_date: str, ext: str = "pp
     cleaned_topic = re.sub(r"[^\w\s-]", "", cleaned_topic)  # Hilangkan karakter aneh
     cleaned_topic = re.sub(r"\s+", "_", cleaned_topic)      # Ganti spasi jadi underscore
 
-    filename = f"{cleaned_topic}_{start_date}_to_{end_date}.{ext}"
+    filename = f"{cleaned_topic}_{start_date}_to_{end_date}_{str(time.time()).replace('.','')}.{ext}"
     return filename
 
 @app.post("/generate-report")
@@ -87,7 +99,8 @@ def generate_report(
 
     logger.info("Setting up save path...")
     
-    SAVE_PATH = os.path.join('REPORT', topic, f"{start_date} - {end_date}")
+    SAVE_PATH = os.path.join('REPORT', topic, f"{start_date} - {end_date}", str(time.time()).replace('.',''))
+
     if not os.path.isdir(SAVE_PATH):
         os.makedirs(SAVE_PATH)
 
@@ -161,9 +174,6 @@ def generate_report(
     RANGE_DATE = format_range_date(start_date, end_date)
 
 
-
-
-
     FILENAME = generate_filename(topic, start_date, end_date, ext = "pptx")
     SAVE_FILE = os.path.join(SAVE_PATH, FILENAME)
 
@@ -175,11 +185,8 @@ def generate_report(
     duration = end_time - start_time
     logger.info(f"Report generation completed in {duration:.2f} seconds")
 
+    logger.info(f"Upload to GCS auto-report")
 
-    logger.info(f"Uplaod to GCS auto-report")
-
-    # Path ke file kredensial JSON
-    json_credentials = 'inlaid-sentinel-444404-f8-be06a73c1031.json' # Ganti dengan path kredensial Anda
     # Upload file dan jadikan publik
     public_url = upload_and_get_public_url(
                                     local_file_path = SAVE_FILE,
@@ -189,6 +196,11 @@ def generate_report(
                                 )
     print(f"File dapat diakses publik di: {public_url}")
 
+    #### SAVE HASIL REPORT NYA KE ES #####
+    "TODO"
+    ######################################
+
+
     if email_receiver:
         logger.info(f"Send Email...")
         
@@ -197,6 +209,28 @@ def generate_report(
         logger.info(f"Send Email Success")
 
     logger.info(f"Upload Success")
+
+    # Store report data in Elasticsearch
+    report_data = {
+        "topic": topic,
+        "start_date": start_date,
+        "end_date": end_date,
+        "duration_seconds": duration,
+        "filename": FILENAME,
+        "public_url": public_url["signed_url"],
+        "keywords": KEYWORDS,
+        "email_receiver": email_receiver,
+        "created_at":datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    }
+    
+    try:
+        es.index(
+            index="moskal-reports",
+            document=report_data
+        )
+        logger.info("Report data stored in Elasticsearch")
+    except Exception as e:
+        logger.error(f"Failed to store report data in Elasticsearch: {str(e)}")
 
     return JSONResponse(
         content={

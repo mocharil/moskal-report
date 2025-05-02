@@ -192,7 +192,8 @@ def generate_recommendations(TOPIC,START_DATE, END_DATE,SAVE_PATH):
         try:
      
             recommendations  = json.loads(re.findall(r'\{.*\}',recommendations_text, flags = re.I|re.S)[0])
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as e:
+            print(f"Direct JSON parsing failed with error: {e}")
             # Use regex as fallback if direct parsing fails
             print("Direct JSON parsing failed, trying regex extraction...")
             json_pattern = re.compile(r'\[\s*\{.*\}\s*\]', re.DOTALL)
