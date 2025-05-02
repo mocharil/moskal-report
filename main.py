@@ -76,30 +76,31 @@ def generate_report(
     email_receiver: Optional[str] = None
 ):
 
-    print("####################################################")
-    print(f"""
-    start date: {start_date}
-    end date: {end_date}
-    topic: {topic}
-    sub_keyword: {sub_keyword}
-    email_receiver: {email_receiver}
-    """)
-    print("####################################################")
-
     start_time = time.time()
     logger.info(f"Starting report generation for topic: {topic}")
-    # try:
-    logger.info("Validating dates...")
+    
     try:
-        datetime.strptime(start_date, "%Y-%m-%d")
-        datetime.strptime(end_date, "%Y-%m-%d")
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD")
+        # Validate email format if provided
+        if email_receiver and not re.match(r"[^@]+@[^@]+\.[^@]+", email_receiver):
+            raise HTTPException(status_code=400, detail="Invalid email format")
 
-    logger.info("Loading environment variables...")
-    load_dotenv()
+        logger.info("Validating dates...")
+        try:
+            datetime.strptime(start_date, "%Y-%m-%d")
+            datetime.strptime(end_date, "%Y-%m-%d")
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD")
 
-    logger.info("Initializing BigQuery client...")
+        logger.info("Loading environment variables...")
+        load_dotenv()
+
+        # Validate required environment variables
+        required_env_vars = ["BQ_PROJECT_ID", "BQ_CREDS_LOCATION", "GCS_CREDS_LOCATION", "GCS_PROJECT_ID", "GCS_BUCKET_NAME"]
+        missing_vars = [var for var in required_env_vars if not os.getenv(var)]
+        if missing_vars:
+            raise ValueError(f"Missing required environment variables: {', '.join(missing_vars)}")
+
+        logger.info("Initializing BigQuery client...")
     BQ = About_BQ(
         project_id=os.getenv("BQ_PROJECT_ID"),
         credentials_loc=os.getenv("BQ_CREDS_LOCATION")
@@ -223,24 +224,30 @@ def generate_report(
 
     logger.info(f"Upload Success")
 
-    return JSONResponse(
-        content={
-            "status": "success",
-            "message": "Report generated successfully",
-            "data": {
-                "report_path": SAVE_FILE,
-                "topic": topic,
-                "start_date": start_date,
-                "end_date": end_date,
-                "url":public_url["signed_url"]
-            }
-        },
-        status_code=200
-    )
+        return JSONResponse(
+            content={
+                "status": "success",
+                "message": "Report generated successfully",
+                "data": {
+                    "report_path": SAVE_FILE,
+                    "topic": topic,
+                    "start_date": start_date,
+                    "end_date": end_date,
+                    "url":public_url["signed_url"]
+                }
+            },
+            status_code=200
+        )
 
-    # except Exception as e:
-    #     logger.error(f"Error during report generation: {str(e)}")
-    #     raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error during report generation: {str(e)}")
+        return JSONResponse(
+            content={
+                "status": "error",
+                "message": str(e)
+            },
+            status_code=500
+        )
 
 @app.post("/generate-sub-keywords")
 def generate_keyword(topic: str = None):

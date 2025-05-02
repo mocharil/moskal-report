@@ -62,12 +62,16 @@ def send_email(FILE, to, TOPIC, RANGE_DATE):
             message.attach(part)
 
     # Send email using Zoho SMTP with TLS
+    # Validate required environment variables
+    if not sender_email or not sender_password:
+        raise ValueError("Missing required environment variables: EMAIL_SENDER or EMAIL_PASSWORD")
+
     try:
         server = smtplib.SMTP(smtp_server, smtp_port)
         server.starttls()
         server.login(sender_email, sender_password)
         server.sendmail(sender_email, [to] + ([cc] if cc else []), message.as_string())
         server.quit()
-        print("✅ Email sent successfully via Zoho!")
+        return True
     except Exception as e:
-        print(f"❌ Failed to send email: {e}")
+        raise Exception(f"Failed to send email: {str(e)}")
