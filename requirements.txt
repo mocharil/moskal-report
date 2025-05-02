@@ -47,7 +47,6 @@ python-dotenv==1.0.0
 tqdm==4.66.1
 pytz==2023.3.post1
 pathlib==1.0.1        # Added for path handling
-shutil-which==3.0.0   # Added for file operations
 
 # Testing & Development
 pytest==7.4.2
