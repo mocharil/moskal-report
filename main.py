@@ -26,11 +26,12 @@ app = FastAPI(title="PPT Generator API")
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allows all origins
+    allow_origins=["*"],
     allow_credentials=True,
-    allow_methods=["*"],  # Allows all methods
-    allow_headers=["*"],  # Allows all headers
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
+
 
 def create_ppt(prs, topic, RANGE_DATE, SAVE_FILE, SAVE_PATH):
     slide_cover(prs, topic, RANGE_DATE, SAVE_FILE)
