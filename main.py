@@ -326,7 +326,7 @@ def get_user_reports(email: str):
             body={
                 "query": {
                     "match": {
-                        "email_receiver": email
+                        "email_receiver.keyword": email
                     }
                 }
             }
@@ -339,7 +339,7 @@ def get_user_reports(email: str):
                 "query": {
                     "bool": {
                         "must": [
-                            {"match": {"email_receiver": email}},
+                            {"match": {"email_receiver.keyword": email}},
                             {"bool": {
                                 "should": [
                                     {"match": {"status": "pending"}},
@@ -363,7 +363,8 @@ def get_user_reports(email: str):
                 "filename": report["filename"],
                 "url": report["public_url"],
                 "created_at": report["created_at"],
-                "status": "completed"
+                "status": "completed",
+                "keywords":report["keywords"]
             })
 
         # Process in-progress reports
@@ -377,7 +378,8 @@ def get_user_reports(email: str):
                 "created_at": report["created_at"],
                 "status": report["status"],
                 "progress": report.get("progress", 0),
-                "job_id": report["id"]
+                "job_id": report["id"],
+                "keywords":report["sub_keyword"].split(',')
             })
 
         # Combine all reports
