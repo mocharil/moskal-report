@@ -240,15 +240,58 @@ def process_report_generation(
         )
 
     except Exception as e:
-        logger.error(f"Error in report generation: {str(e)}")
-        # Update job status to failed
+        import traceback
+        error_info = traceback.format_exc()
+        error_location = error_info.split('\n')[-2] if error_info else 'Unknown location'
+        
+        # Determine which step was being executed when error occurred
+        current_step_name = "Unknown step"
+        if 'generate_metrics_chart' in error_info:
+            current_step_name = "Generating metrics chart"
+        elif 'generate_topic_overview' in error_info:
+            current_step_name = "Generating topic overview"
+        elif 'generate_kol' in error_info:
+            current_step_name = "Generating KOL analysis"
+        elif 'generatre_presence_score' in error_info:
+            current_step_name = "Generating presence score"
+        elif 'generate_object' in error_info:
+            current_step_name = "Generating object analysis"
+        elif 'generate_context' in error_info:
+            current_step_name = "Generating context analysis"
+        elif 'generate_sentiment_analysis' in error_info:
+            current_step_name = "Generating sentiment analysis"
+        elif 'generate_popular_mentions' in error_info:
+            current_step_name = "Generating popular mentions"
+        elif 'generate_recommendations' in error_info:
+            current_step_name = "Generating recommendations"
+        elif 'generate_executive_summary' in error_info:
+            current_step_name = "Generating executive summary"
+        elif 'create_ppt' in error_info:
+            current_step_name = "Creating PowerPoint presentation"
+        elif 'upload_and_get_public_url' in error_info:
+            current_step_name = "Uploading to cloud storage"
+        elif 'send_email' in error_info:
+            current_step_name = "Sending email notification"
+
+        error_message = f"""
+Error occurred during: {current_step_name}
+Location: {error_location}
+Error details: {str(e)}
+Full traceback:
+{error_info}
+"""
+        logger.error(error_message)
+        
+        # Update job status to failed with detailed error information
         es.update(
             index="moskal-report-jobs",
             id=job_id,
             body={
                 "doc": {
                     "status": "failed",
-                    "error": str(e)
+                    "error": error_message,
+                    "error_step": current_step_name,
+                    "error_location": error_location
                 }
             }
         )
