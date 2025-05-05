@@ -361,7 +361,7 @@ def get_report_status(job_id: str):
     except Exception as e:
         raise HTTPException(status_code=404, detail=f"Job not found: {str(e)}")
 
-@app.get("/user-reports/{email}")
+@app.get("/user-reports2/{email}")
 def get_user_reports(email: str):
     try:
         # Search for completed reports
@@ -372,7 +372,14 @@ def get_user_reports(email: str):
                     "match": {
                         "email_receiver.keyword": email
                     }
-                }
+                },
+                "sort": [
+                    {
+                    "created_at.keyword": {
+                        "order": "desc"
+                    }
+                    }
+                ]
             }
         )
 
@@ -391,7 +398,14 @@ def get_user_reports(email: str):
                             }}
                         ]
                     }
-                }
+                },
+                "sort": [
+                    {
+                    "created_at.keyword": {
+                        "order": "desc"
+                    }
+                    }
+                ]
             }
         )
 
@@ -441,6 +455,8 @@ def get_user_reports(email: str):
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error retrieving reports: {str(e)}")
+
+
 
 @app.post("/regenerate-report")
 async def regenerate_report(
