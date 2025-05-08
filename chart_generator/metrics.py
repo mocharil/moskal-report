@@ -108,7 +108,7 @@ def generate_mentions_chart(title,data, current_mentions, previous_mentions, men
                 transform=ax.transAxes, fontsize=18, color=delta_color, weight='bold')
         
         plt.tight_layout()
-        plt.savefig(save_file, bbox_inches='tight', dpi=150, transparent=True)
+        plt.savefig(save_file, bbox_inches='tight', dpi=50, transparent=True)
         return
     
     spline = make_interp_spline(x, y, k=k)
@@ -164,7 +164,7 @@ def generate_mentions_chart(title,data, current_mentions, previous_mentions, men
     
     save_file = os.path.join(SAVE_PATH, f"{title.lower().replace(' ', '_')}.png")
     
-    plt.savefig(save_file, bbox_inches='tight', dpi=150, transparent=True)
+    plt.savefig(save_file, bbox_inches='tight', dpi=75, transparent=True)
 
 def plot_current_vs_previous_period(data, title="Current vs Previous Period", save_path=None, show_dots=True):
     df = pd.DataFrame(data)
@@ -267,7 +267,7 @@ def plot_current_vs_previous_period(data, title="Current vs Previous Period", sa
     plt.tight_layout()
 
     if save_path:
-        plt.savefig(save_path, bbox_inches='tight', dpi=150, transparent=True)
+        plt.savefig(save_path, bbox_inches='tight', dpi=75, transparent=True)
        
 def get_time_series(FILTER_KEYWORD, START_DATE, END_DATE, prev_start_date=None, prev_end_date=None):
     """

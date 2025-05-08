@@ -11,6 +11,19 @@ from report_generator.slider import *
 from utils.functions import format_range_date, upload_and_get_public_url
 from utils.send_email import send_email
 from pptx import Presentation
+from chart_generator.metrics import generate_metrics_chart
+from chart_generator.topics import generate_topic_overview
+from chart_generator.kol import generate_kol
+from chart_generator.presence_score import generatre_presence_score
+from chart_generator.mentions import generate_popular_mentions
+from chart_generator.object import generate_object
+from chart_generator.context import generate_context
+from chart_generator.sentiment import generate_sentiment_analysis
+from chart_generator.recommendations import generate_recommendations
+from chart_generator.exsum import generate_executive_summary
+import warnings
+warnings.filterwarnings("ignore", category=UserWarning, module="matplotlib")
+
 load_dotenv()
 
 # Configure Elasticsearch
@@ -42,29 +55,52 @@ app.add_middleware(
 )
 
 def create_ppt(prs, topic, RANGE_DATE, SAVE_FILE, SAVE_PATH):
+    start_time = time.time()
+    last_step_time = start_time
+
+    def log_slide_time(slide_name: str):
+        nonlocal last_step_time
+        current_time = time.time()
+        step_duration = current_time - last_step_time
+        total_duration = current_time - start_time
+        logger.info(f"Slide {slide_name}: took {step_duration:.2f}s, total time: {total_duration:.2f}s")
+        last_step_time = current_time
+
     slide_cover(prs, topic, RANGE_DATE, SAVE_FILE)
-    logger.info("Creating slide 2: Summary mentions...")
+    log_slide_time("1: Cover")
+
     slide_summary_mentions(prs, topic, RANGE_DATE, SAVE_FILE, page_number=2, SOURCE=SAVE_PATH)
-    logger.info("Creating slide 3: Reach trend...")
+    log_slide_time("2: Summary mentions")
+
     slide_reach_trend(prs, topic, RANGE_DATE, SAVE_FILE, page_number=3, SOURCE=SAVE_PATH)
-    logger.info("Creating slide 4: Sentiment trend...")
+    log_slide_time("3: Reach trend")
+
     slide_sentiment_trend(prs, topic, RANGE_DATE, SAVE_FILE, page_number=4, SOURCE=SAVE_PATH)
-    logger.info("Creating slide 5: Topic overview...")
+    log_slide_time("4: Sentiment trend")
+
     slide_topic_overview(prs, topic, RANGE_DATE, SAVE_FILE, page_number=5, SOURCE=SAVE_PATH)
-    logger.info("Creating slide 6: KOL analysis...")
+    log_slide_time("5: Topic overview")
+
     slide_kol(prs, topic, RANGE_DATE, SAVE_FILE, page_number=6, SOURCE=SAVE_PATH)
-    logger.info("Creating slide 8: Presence score...")
+    log_slide_time("6: KOL analysis")
+
     slide_presence_score(prs, topic, RANGE_DATE, SAVE_FILE, page_number=8, SOURCE=SAVE_PATH)
-    logger.info("Creating slide 9: Sentiment analysis...")
+    log_slide_time("8: Presence score")
+
     slide_sentiment_analysis(prs, topic, RANGE_DATE, SAVE_FILE, page_number=9, SOURCE=SAVE_PATH)
-    logger.info("Creating slide 10: Sentiment context...")
+    log_slide_time("9: Sentiment analysis")
+
     slide_sentiment_context(prs, topic, RANGE_DATE, SAVE_FILE, page_number=10, SOURCE=SAVE_PATH)
-    logger.info("Creating slide 11: Popular mentions...")
+    log_slide_time("10: Sentiment context")
+
     slide_popular_mentions(prs, topic, RANGE_DATE, SAVE_FILE, page_number=11, SOURCE=SAVE_PATH)
-    logger.info("Creating slide 12: Recommendations...")
+    log_slide_time("11: Popular mentions")
+
     slide_recommendations(prs, topic, RANGE_DATE, SAVE_FILE, page_number=12, SOURCE=SAVE_PATH)
-    logger.info("Creating slide 13: Executive summary...")
+    log_slide_time("12: Recommendations")
+
     slide_executive_summary(prs, topic, RANGE_DATE, SAVE_FILE, page_number=13, SOURCE=SAVE_PATH)
+    log_slide_time("13: Executive summary")
 
 def generate_filename(topic: str, start_date: str, end_date: str, ext: str = "pptx") -> str:
     cleaned_topic = topic.strip().lower()
@@ -79,11 +115,21 @@ def process_report_generation(
     start_date: str,
     end_date: str,
     sub_keyword: str,
-    email_receiver: Optional[str]
+    email_receiver: Optional[str],
+    background_tasks: BackgroundTasks
 ):
     try:
-        start_time = time.time()
+        total_start_time = time.time()
+        last_step_time = total_start_time
         logger.info(f"Starting report generation for job {job_id}")
+
+        def log_step_time(step_name: str):
+            nonlocal last_step_time
+            current_time = time.time()
+            step_duration = current_time - last_step_time
+            total_duration = current_time - total_start_time
+            logger.info(f"{step_name}: took {step_duration:.2f}s, total time: {total_duration:.2f}s")
+            last_step_time = current_time
 
         # Update job status to processing
         es.update(
@@ -135,55 +181,64 @@ def process_report_generation(
             )
 
         # Generate all charts
-        from chart_generator.metrics import generate_metrics_chart
         generate_metrics_chart(KEYWORDS, start_date, end_date, prev_start_date, prev_end_date, SAVE_PATH)
         current_step += 1
         update_progress(current_step, total_steps)
+        log_step_time("Metrics chart generation")
 
-        from chart_generator.topics import generate_topic_overview
+        
         generate_topic_overview(topic, KEYWORDS, start_date, end_date, SAVE_PATH)
         current_step += 1
         update_progress(current_step, total_steps)
+        log_step_time("Topic overview generation")
 
-        from chart_generator.kol import generate_kol
+        
         generate_kol(topic, KEYWORDS, start_date, end_date, SAVE_PATH)
         current_step += 1
         update_progress(current_step, total_steps)
+        log_step_time("KOL analysis generation")
 
-        from chart_generator.presence_score import generatre_presence_score
+        
         generatre_presence_score(topic, KEYWORDS, start_date, end_date, SAVE_PATH)
         current_step += 1
         update_progress(current_step, total_steps)
+        log_step_time("Presence score generation")
 
-        from chart_generator.object import generate_object
+        
         generate_object(KEYWORDS, start_date, end_date, limit=10, SAVE_PATH=SAVE_PATH)
         current_step += 1
         update_progress(current_step, total_steps)
+        log_step_time("Object analysis generation")
 
-        from chart_generator.context import generate_context
+        
         generate_context(KEYWORDS, start_date, end_date, SAVE_PATH)
         current_step += 1
         update_progress(current_step, total_steps)
+        log_step_time("Context analysis generation")
 
-        from chart_generator.sentiment import generate_sentiment_analysis
+        
         generate_sentiment_analysis(topic, KEYWORDS, start_date, end_date, SAVE_PATH)
         current_step += 1
         update_progress(current_step, total_steps)
+        log_step_time("Sentiment analysis generation")
 
-        from chart_generator.mentions import generate_popular_mentions
-        generate_popular_mentions(KEYWORDS, start_date, end_date, SAVE_PATH)
+        
+        generate_popular_mentions(topic,KEYWORDS, start_date, end_date, SAVE_PATH)
         current_step += 1
         update_progress(current_step, total_steps)
+        log_step_time("Popular mentions generation")
 
-        from chart_generator.recommendations import generate_recommendations
+        
         generate_recommendations(topic, start_date, end_date, SAVE_PATH)
         current_step += 1
         update_progress(current_step, total_steps)
+        log_step_time("Recommendations generation")
 
-        from chart_generator.exsum import generate_executive_summary
+        
         summary = generate_executive_summary(topic, start_date, end_date, SAVE_PATH)
         current_step += 1
         update_progress(current_step, total_steps)
+        log_step_time("Executive summary generation")
 
         # Generate PowerPoint
         RANGE_DATE = format_range_date(start_date, end_date)
@@ -191,6 +246,7 @@ def process_report_generation(
         SAVE_FILE = os.path.join(SAVE_PATH, FILENAME)
         prs = Presentation()
         create_ppt(prs, topic, RANGE_DATE, SAVE_FILE, SAVE_PATH)
+        log_step_time("PowerPoint generation")
 
         # Upload to GCS
         public_url = upload_and_get_public_url(
@@ -200,12 +256,20 @@ def process_report_generation(
             bucket_name=os.getenv("GCS_BUCKET_NAME")
         )
 
-        # Send email if requested
+        # Start background task for email sending if requested
         if email_receiver:
-            send_email(SAVE_FILE, email_receiver, topic, RANGE_DATE)
+            background_tasks.add_task(
+                send_email,
+                SAVE_FILE,
+                email_receiver,
+                topic,
+                RANGE_DATE
+            )
 
         end_time = time.time()
-        duration = end_time - start_time
+        duration = end_time - total_start_time
+
+        log_step_time("GCS upload")
 
         # Store final report data
         report_data = {
@@ -334,7 +398,8 @@ def generate_report(
         start_date,
         end_date,
         sub_keyword,
-        email_receiver
+        email_receiver,
+        background_tasks
     )
 
     return JSONResponse(
@@ -360,103 +425,6 @@ def get_report_status(job_id: str):
         )
     except Exception as e:
         raise HTTPException(status_code=404, detail=f"Job not found: {str(e)}")
-
-@app.get("/user-reports2/{email}")
-def get_user_reports(email: str):
-    try:
-        # Search for completed reports
-        completed_result = es.search(
-            index="moskal-reports",
-            body={
-                "query": {
-                    "match": {
-                        "email_receiver.keyword": email
-                    }
-                },
-                "sort": [
-                    {
-                    "created_at.keyword": {
-                        "order": "desc"
-                    }
-                    }
-                ]
-            }
-        )
-
-        # Search for in-progress reports
-        in_progress_result = es.search(
-            index="moskal-report-jobs",
-            body={
-                "query": {
-                    "bool": {
-                        "must": [
-                            {"match": {"email_receiver.keyword": email}},
-                            {"bool": {
-                                "must_not": [
-                                    {"match": {"status": "completed"}}
-                                ]
-                            }}
-                        ]
-                    }
-                },
-                "sort": [
-                    {
-                    "created_at.keyword": {
-                        "order": "desc"
-                    }
-                    }
-                ]
-            }
-        )
-
-        # Process completed reports
-        completed_reports = []
-        for hit in completed_result["hits"]["hits"]:
-            report = hit["_source"]
-            completed_reports.append({
-                "topic": report["topic"],
-                "start_date": report["start_date"],
-                "end_date": report["end_date"],
-                "filename": report["filename"],
-                "url": report["public_url"],
-                "created_at": report["created_at"],
-                "status": "completed",
-                "keywords": report["keywords"],
-                "summary": report.get("summary", "Summary not available")
-            })
-
-        # Process in-progress reports
-        in_progress_reports = []
-        for hit in in_progress_result["hits"]["hits"]:
-            report = hit["_source"]
-            in_progress_reports.append({
-                "topic": report["topic"],
-                "start_date": report["start_date"],
-                "end_date": report["end_date"],
-                "created_at": report["created_at"],
-                "status": report["status"],
-                "progress": report.get("progress", 0),
-                "job_id": report["id"],
-                "keywords":report["sub_keyword"].split(','),
-                "summary": report.get("summary", "Summary not available")
-            })
-
-        # Combine all reports
-        all_reports = in_progress_reports + completed_reports
-
-        return JSONResponse(
-            content={
-                "status": "success",
-                "data": {
-                    "total": len(all_reports),
-                    "reports": all_reports
-                }
-            }
-        )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error retrieving reports: {str(e)}")
-
-
 
 @app.post("/regenerate-report")
 async def regenerate_report(
@@ -500,7 +468,8 @@ async def regenerate_report(
             job_data["start_date"],
             job_data["end_date"],
             job_data["sub_keyword"],
-            job_data["email_receiver"]
+            job_data["email_receiver"],
+            background_tasks
         )
 
         return JSONResponse(

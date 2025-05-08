@@ -18,12 +18,9 @@ from vertexai.generative_models import (
 from dotenv import load_dotenv
 
 load_dotenv() 
-print('V2')
 # Vertex AI configuration
 project_id = os.getenv("GEMINI_PROJECT_ID")
 credentials_file_path = os.getenv("GEMINI_CREDS_LOCATION")
-print('-------------->GEMINI_CREDS_LOCATION:',credentials_file_path)
-print('-------------->GEMINI_PROJECT_ID:',project_id)
 
 credentials = service_account.Credentials.from_service_account_file(credentials_file_path)
 vertexai.init(project=project_id, credentials=credentials)

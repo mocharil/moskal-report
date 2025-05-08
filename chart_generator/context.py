@@ -168,7 +168,8 @@ def get_context_data(
         return pd.DataFrame(columns=["word", "total_mentions", "dominant_sentiment", "dominant_sentiment_count", "dominant_sentiment_percentage"])
 
 def create_sentiment_wordcloud(data, width=600, height=350, background_color='white', 
-                              max_words=100, figsize=(8, 5), title="Hashtag Word Cloud by Sentiment", word='hashtag'):
+                              max_words=100, figsize=(8, 5),
+                               word='hashtag',SAVE_PATH = ''):
 
     # Convert to DataFrame
     df = pd.DataFrame(data)
@@ -219,7 +220,9 @@ def create_sentiment_wordcloud(data, width=600, height=350, background_color='wh
     ax.set_axis_off()
     
     plt.tight_layout(pad=0)
-    return fig, ax
+    
+    save_file = os.path.join(SAVE_PATH, f'{word}_sentiment_wordcloud.png')
+    plt.savefig(save_file, dpi=75, bbox_inches='tight', transparent=True)
 
 def context( KEYWORDS, START_DATE, END_DATE, SAVE_PATH ):
 
@@ -242,9 +245,9 @@ def context( KEYWORDS, START_DATE, END_DATE, SAVE_PATH ):
 
     word = word[~word['word'].isin(list_stopword)][:50]
 
-    fig, ax = create_sentiment_wordcloud(word.to_dict(orient = 'records'), word = 'word')
-    save_file = os.path.join(SAVE_PATH, 'word_sentiment_wordcloud.png')
-    plt.savefig(save_file, dpi=500, bbox_inches='tight', transparent=True)
+    create_sentiment_wordcloud(word.to_dict(orient = 'records'),
+                        word = 'word', SAVE_PATH = SAVE_PATH)
+    
 
 
 def hashtags( KEYWORDS, START_DATE, END_DATE, SAVE_PATH ):
@@ -253,26 +256,17 @@ def hashtags( KEYWORDS, START_DATE, END_DATE, SAVE_PATH ):
                 keywords=KEYWORDS,
                 start_date=START_DATE,
                 end_date=END_DATE,
-                limit=50,
+                limit=60,
                 kind = 'hashtag'
             )
 
-    fig, ax = create_sentiment_wordcloud(hashtags.to_dict(orient = 'records'), word = 'hashtag')
-    save_file = os.path.join(SAVE_PATH,'hashtag_sentiment_wordcloud.png')
-    plt.savefig(save_file, dpi=500, bbox_inches='tight', transparent=True)
+    #filter yg mengandung kata fyp
+    hashtags = hashtags[~hashtags['hashtag'].str.contains('fyp')]
+    hashtags = hashtags[~hashtags['hashtag'].str.contains('capcut')]
 
-    
+    create_sentiment_wordcloud(hashtags.to_dict(orient = 'records'),
+             word = 'hashtag', SAVE_PATH = SAVE_PATH)
+
 def generate_context( KEYWORDS, START_DATE, END_DATE, SAVE_PATH):
-    import time
-    start_time = time.time()
-    print('word')
     context(KEYWORDS, START_DATE, END_DATE, SAVE_PATH)
-    end_time = time.time()
-    elapsed = end_time - start_time
-    print('finish',elapsed)
-    start_time = time.time()
-    print('hashtags')
     hashtags(KEYWORDS, START_DATE, END_DATE, SAVE_PATH)
-    end_time = time.time()
-    elapsed = end_time - start_time
-    print('finish',elapsed)

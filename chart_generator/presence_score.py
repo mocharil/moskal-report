@@ -44,7 +44,7 @@ def plot_donut_score(score, title="How much attention\na topic or figure gets", 
     plt.tight_layout()
 
     if save_path:
-        plt.savefig(save_path, bbox_inches='tight', dpi=150, transparent=True)
+        plt.savefig(save_path, bbox_inches='tight', dpi=75, transparent=True)
 
 def plot_presence_score_trend(data, title="Your presence score", save_path=None,
                               show_dots=True, color_theme='#1a73e8'):
@@ -105,7 +105,7 @@ def plot_presence_score_trend(data, title="Your presence score", save_path=None,
 
     plt.tight_layout()
     if save_path:
-        plt.savefig(save_path, bbox_inches='tight', dpi=150, transparent=True)
+        plt.savefig(save_path, bbox_inches='tight', dpi=75, transparent=True)
         
 def get_data(KEYWORDS, START_DATE, END_DATE):
     """
@@ -193,8 +193,7 @@ def get_data(KEYWORDS, START_DATE, END_DATE):
                                     def retweets = doc.containsKey('retweets') && !doc['retweets'].empty ? doc['retweets'].value : 0;
                                     def replies = doc.containsKey('replies') && !doc['replies'].empty ? doc['replies'].value : 0;
                                     def reposts = doc.containsKey('reposts') && !doc['reposts'].empty ? doc['reposts'].value : 0;
-                                    def votes = doc.containsKey('votes') && !doc['votes'].empty ? doc['votes'].value : 0;
-                                    
+                                    def votes = doc.containsKey('votes') && !doc['votes'].empty ? doc['votes'].value : 0;          
                                     return likes + shares + comments + favorites + views + retweets + replies + reposts + votes;
                                 """
                             }
@@ -495,7 +494,7 @@ def presence_description(TOPIC, FILTER_KEYWORD, high_presence_date,SAVE_PATH):
 
     #summarize
     prompt = f"""
-    You are a media analyst assistant. Analyze a spike in presence score related to the topic [{TOPIC}] on {high_presence_date}.
+    You are a media analyst assistant. Analyze a spike in presence score related to the topic "{TOPIC}" on {high_presence_date}.
 
     Here is the supporting data:
 
@@ -511,7 +510,7 @@ def presence_description(TOPIC, FILTER_KEYWORD, high_presence_date,SAVE_PATH):
     ---
 
     **Instruction:**  
-    Summarize in **1 paragraph only** what likely caused the spike, which platform contributed the most, what sentiment dominated, and what topic(s) were most discussed — **only if relevant to [{TOPIC}]**. Use a professional, concise tone.
+    Summarize in **1 paragraph only** what likely caused the spike, which platform contributed the most, what sentiment dominated, and what topic(s) were most discussed — **only if relevant to Topic: "{TOPIC}" **. Use a professional, concise tone.
     """
     summarize = call_gemini(prompt)
 

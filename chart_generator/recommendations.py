@@ -15,7 +15,7 @@ def generate_recommendations(TOPIC,START_DATE, END_DATE,SAVE_PATH):
     try:
         with open(os.path.join(SAVE_PATH, 'sentiment_breakdown.json'), 'r') as f:
             data['sentiment_counts'] = json.load(f)
-        print("Loaded sentiment breakdown data")
+      
     except Exception as e:
         print(f"Error loading sentiment breakdown: {e}")
         data['sentiment_counts'] = {}
@@ -24,7 +24,6 @@ def generate_recommendations(TOPIC,START_DATE, END_DATE,SAVE_PATH):
     try:
         with open(os.path.join(SAVE_PATH, 'sentiment_by_categories.json'), 'r') as f:
             data['pivot_sentiment'] = json.load(f)
-        print("Loaded sentiment by categories data")
     except Exception as e:
         print(f"Error loading sentiment by categories: {e}")
         data['pivot_sentiment'] = []
@@ -33,7 +32,7 @@ def generate_recommendations(TOPIC,START_DATE, END_DATE,SAVE_PATH):
     try:
         with open(os.path.join(SAVE_PATH, 'presence_score_analysis.json'), 'r') as f:
             data['presence_score_analysis'] = json.load(f)
-        print("Loaded presence score analysis")
+    
     except Exception as e:
         print(f"Error loading presence score analysis: {e}")
         data['presence_score_analysis'] = {}
@@ -42,7 +41,7 @@ def generate_recommendations(TOPIC,START_DATE, END_DATE,SAVE_PATH):
     try:
         with open(os.path.join(SAVE_PATH, 'sentiment_analysis.json'), 'r') as f:
             data['sentiment_analysis'] = json.load(f)
-        print("Loaded sentiment analysis")
+  
     except Exception as e:
         print(f"Error loading sentiment analysis: {e}")
         data['sentiment_analysis'] = {}
@@ -50,7 +49,7 @@ def generate_recommendations(TOPIC,START_DATE, END_DATE,SAVE_PATH):
     # 5. Load popular_mentions.csv
     try:
         data['popular_mentions'] = pd.read_csv(os.path.join(SAVE_PATH, 'popular_mentions.csv')).to_dict(orient='records')[:10]  # Limit to top 10
-        print("Loaded popular mentions data")
+       
     except Exception as e:
         print(f"Error loading popular mentions: {e}")
         data['popular_mentions'] = []
@@ -62,7 +61,6 @@ def generate_recommendations(TOPIC,START_DATE, END_DATE,SAVE_PATH):
             for line in f:
                 kol_data.append(json.loads(line.strip()))
         data['kol_data'] = kol_data[:10]  # Limit to top 10
-        print("Loaded KOL data")
     except Exception as e:
         print(f"Error loading KOL data: {e}")
         data['kol_data'] = []
@@ -74,7 +72,7 @@ def generate_recommendations(TOPIC,START_DATE, END_DATE,SAVE_PATH):
             for line in f:
                 topic_data.append(json.loads(line.strip()))
         data['top_entities'] = topic_data[:15]  # Limit to top 15
-        print("Loaded topic overview data")
+       
     except Exception as e:
         print(f"Error loading topic overview: {e}")
         data['top_entities'] = []
@@ -182,8 +180,6 @@ def generate_recommendations(TOPIC,START_DATE, END_DATE,SAVE_PATH):
     IMPORTANT: Ensure your output is ONLY the properly formatted JSON with no additional text, markdown, or explanatory content. The JSON array must contain EXACTLY 4 recommendation objects. Each recommendation must have EXACTLY 3 actions.
     """
     
-    print("Prompt generated, calling LLM...")
-    
     try:
         # Call LLM to generate recommendations
         recommendations_text = call_gemini(prompt)
@@ -192,42 +188,19 @@ def generate_recommendations(TOPIC,START_DATE, END_DATE,SAVE_PATH):
         try:
      
             recommendations  = json.loads(re.findall(r'\[.*\]',recommendations_text, flags = re.I|re.S)[0])
-        except json.JSONDecodeError as e:
-            print(f"Direct JSON parsing failed with error: {e}")
-            # Use regex as fallback if direct parsing fails
-            print("Direct JSON parsing failed, trying regex extraction...")
-            json_pattern = re.compile(r'\[\s*\{.*\}\s*\]', re.DOTALL)
-            json_match = json_pattern.search(recommendations_text)
-            
-            if json_match:
-                json_str = json_match.group(0)
-                recommendations = json.loads(json_str)
-            else:
-                # Last-resort fallback parsing for valid portions
-                print("Regex extraction failed, trying fallback parsing...")
-                title_pattern = re.compile(r'"title":\s*"([^"]+)"')
-                actions_pattern = re.compile(r'"actions":\s*\[(.*?)\]', re.DOTALL)
-                action_item_pattern = re.compile(r'"([^"]+)"')
-                
-                recommendations = []
-                
-                # Find all title matches
-                title_matches = title_pattern.finditer(recommendations_text)
-                for title_match in title_matches:
-                    title = title_match.group(1)
-                    # Find corresponding actions
-                    actions_match = actions_pattern.search(recommendations_text, title_match.end())
-                    if actions_match:
-                        actions_text = actions_match.group(1)
-                        actions = [m.group(1) for m in action_item_pattern.finditer(actions_text)]
-                        if actions:
-                            recommendations.append({"title": title, "actions": actions})
-                
+        except:
+            recommendations = []
+            titles = re.findall(r'''title[\"\'\s]+:[\"\'\s]+(.*?)[\"\']+''',recommendations_text, flags=re.I|re.S)
+            actions = re.findall(r'''actions[\"\'\s]+:[\"\'\s]+\[(.*?)[\}\]]+''',recommendations_text, flags=re.I|re.S)
+
+            for t, a in zip(titles, actions):
+                recommendations.append({'title':t,
+                                      'actions':[i.strip() for i in a.split('",')]})
+         
         # Save the recommendations to file
         with open(os.path.join(SAVE_PATH, 'recommendations.json'), 'w') as f:
             json.dump(recommendations, f, indent=2)
             
-        print(f"Recommendations generated and saved to {os.path.join(SAVE_PATH, 'recommendations.json')}")
         return recommendations
         
     except Exception as e:
@@ -240,7 +213,8 @@ def generate_recommendations(TOPIC,START_DATE, END_DATE,SAVE_PATH):
                     "Review input data files for completeness and formatting issues.",
                     "Check LLM connection and retry with simplified prompt.",
                     "Consider manual analysis if automation continues to fail."
-                ]
+                ],
+                "output":str(recommendations_text)
             }
         ]
         

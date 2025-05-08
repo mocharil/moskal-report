@@ -71,9 +71,7 @@ def generate_kol(MAIN_TOPIC,KEYWORDS, START_DATE, END_DATE, SAVE_PATH):
 
 
     kol = pd.DataFrame(result['data'])
-    print(kol.shape)
 
-    print('set metrics')
     for i in set(['user_influence_score','user_followers']) - set(kol):
         kol[i] = 0
 

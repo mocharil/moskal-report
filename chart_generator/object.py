@@ -11,7 +11,7 @@ es = Elasticsearch(os.getenv('ES_HOST',"http://34.101.178.71:9200/"),
     basic_auth=(os.getenv("ES_USERNAME","elastic"),os.getenv('ES_PASSWORD',"elasticpassword"))  # Sesuaikan dengan kredensial Anda
         )
 
-def create_sentiment_distribution_chart(df, title="Sentiment Distribution by Entity", figsize=(20, 15)):
+def create_sentiment_distribution_chart_backup(df, title="Sentiment Distribution by Entity", figsize=(20, 15)):
 
     # Convert to DataFrame and sort by total mentions
     df = df.sort_values('total_mentions')
@@ -104,6 +104,88 @@ def create_sentiment_distribution_chart(df, title="Sentiment Distribution by Ent
     
     return fig, ax_labels, ax
 
+def create_sentiment_distribution_chart(df,  figsize=(22, 15), SAVE_PATH=None):
+    # Prepare data
+    if 'total_mentions' not in df.columns:
+        df['total_mentions'] = df['positive_mentions'] + df['negative_mentions'] + df['neutral_mentions']
+    df = df.sort_values('total_mentions', ascending=True).reset_index(drop=True)
+    df['negative_percentage'] = (df['negative_mentions'] / df['total_mentions']) * 100
+    df['neutral_percentage'] = (df['neutral_mentions'] / df['total_mentions']) * 100
+    df['positive_percentage'] = (df['positive_mentions'] / df['total_mentions']) * 100
+
+    # Colors
+    COLOR_NEG = "#FF9999"
+    COLOR_NEU = "#f0f0f0"
+    COLOR_POS = "#8fdfa8"
+
+    fig, ax = plt.subplots(figsize=figsize)
+    fig.patch.set_facecolor('white')
+    ax.set_facecolor('white')
+
+    y_pos = np.arange(len(df))
+    bar_height = 0.5
+
+    # Draw bars
+    neg_bars = ax.barh(y_pos, df['negative_mentions'], height=bar_height, color=COLOR_NEG, zorder=3)
+    neu_bars = ax.barh(y_pos, df['neutral_mentions'], height=bar_height,
+                       left=df['negative_mentions'], color=COLOR_NEU, zorder=3)
+    pos_bars = ax.barh(y_pos, df['positive_mentions'], height=bar_height,
+                       left=df['negative_mentions'] + df['neutral_mentions'], color=COLOR_POS, zorder=3)
+
+    for bar in neg_bars + neu_bars + pos_bars:
+        bar.set_edgecolor('white')
+        bar.set_linewidth(0.6)
+
+    # Add entity labels on left (inside ax), no ax_labels used anymore
+    for i, entity in enumerate(df['object_item']):
+        ax.text(-20, i, entity, va='center', ha='right', fontsize=12, fontweight='medium', color='#333')
+
+    # Add percentage and total labels
+    for i, row in df.iterrows():
+        neg, neu, pos, total = row['negative_mentions'], row['neutral_mentions'], row['positive_mentions'], row['total_mentions']
+        neg_perc, neu_perc, pos_perc = row['negative_percentage'], row['neutral_percentage'], row['positive_percentage']
+        min_width = 50
+
+        if neg > min_width:
+            ax.text(neg / 2, i, f"{neg_perc:.0f}%", va='center', ha='center', color='#722F37', fontsize=10, fontweight='medium')
+        elif neg > 0:
+            ax.text(5, i, f"{neg_perc:.0f}%", va='center', ha='left', color='#722F37', fontsize=10)
+
+        if neu > min_width:
+            ax.text(neg + neu / 2, i, f"{neu_perc:.0f}%", va='center', ha='center', color='#555', fontsize=10)
+
+        if pos > min_width:
+            ax.text(neg + neu + pos / 2, i, f"{pos_perc:.0f}%", va='center', ha='center', color='#337B5F', fontsize=10)
+
+        ax.text(neg + neu + pos + 10, i, f"Total: {int(total)}", va='center', ha='left', color='#333', fontsize=10)
+
+    # Adjust layout
+    max_val = df['total_mentions'].max()
+    buffer = max_val * 0.15
+    ax.set_xlim(-50, max_val + buffer)  # allow space for labels on the left
+    ax.set_ylim(-0.5, len(df) - 0.5)
+    ax.set_yticks([])
+    ax.set_xticks(np.arange(0, max_val + buffer, max(100, int(max_val / 8))))
+    ax.set_xticklabels([str(int(x)) for x in ax.get_xticks()], fontsize=10)
+    ax.set_xlabel('Number of mentions', fontsize=12)
+
+    for spine in ax.spines.values():
+        spine.set_visible(False)
+
+    ax.grid(axis='x', linestyle='--', alpha=0.3, zorder=1)
+
+    from matplotlib.lines import Line2D
+    legend_elements = [
+        Line2D([0], [0], color=COLOR_NEG, lw=10, label='Negative'),
+        Line2D([0], [0], color=COLOR_NEU, lw=10, label='Neutral'),
+        Line2D([0], [0], color=COLOR_POS, lw=10, label='Positive'),
+    ]
+    ax.legend(handles=legend_elements, loc='upper center', bbox_to_anchor=(0.5, -0.08),
+              frameon=False, fontsize=11, ncol=3)
+
+    plt.tight_layout(rect=[0, 0.08, 1, 0.95])
+    save_file = os.path.join(SAVE_PATH, 'sentiment_distribution_by_entity.png')
+    plt.savefig(save_file, dpi=70, bbox_inches='tight', transparent=True)
 def generate_object(KEYWORDS, START_DATE, END_DATE, limit=10, SAVE_PATH=None):
     """
     Mengambil data sentimen terhadap objek dari Elasticsearch.
@@ -324,6 +406,6 @@ def generate_object(KEYWORDS, START_DATE, END_DATE, limit=10, SAVE_PATH=None):
     df.to_csv(os.path.join(SAVE_PATH, 'sentiment_distribution_by_entity.csv'), index=False)
 
 
-    fig, ax_labels, ax  = create_sentiment_distribution_chart(df)
-    save_file = os.path.join(SAVE_PATH, 'sentiment_distribution_by_entity.png')
-    plt.savefig(save_file, dpi=300, bbox_inches='tight', transparent=True)
+    create_sentiment_distribution_chart(df,SAVE_PATH = SAVE_PATH)
+
+ 

@@ -24,17 +24,21 @@ def generate_topic_overview(TOPIC, KEYWORDS, START_DATE, END_DATE, SAVE_PATH):
         "project_name": TOPIC
     }
 
-    response = requests.post(url, headers=headers, json=payload)
-
-    df_topics = pd.DataFrame(response.json())
+    for i in range(5):
+        try:
+            response = requests.post(url, headers=headers, json=payload)
+            df_topics = pd.DataFrame(response.json())
+            break
+        except:
+            pass
 
     df_topics = df_topics.rename(columns = {'viral_score':'total_viral_score',
                             'reach_score':'total_reach_score',
                             'total_posts':'total_issue'})
 
-    df_topics['percentage_negative'] = df_topics['negative']/df_topics['total_issue']*100
-    df_topics['percentage_positive'] = df_topics['positive']/df_topics['total_issue']*100
-    df_topics['percentage_neutral'] = df_topics['neutral']/df_topics['total_issue']*100
+    df_topics['percentage_negative'] = round(df_topics['negative']/df_topics['total_issue']*100)
+    df_topics['percentage_positive'] = round(df_topics['positive']/df_topics['total_issue']*100)
+    df_topics['percentage_neutral'] = round(df_topics['neutral']/df_topics['total_issue']*100)
 
 
     df_top_final = df_topics[:5]

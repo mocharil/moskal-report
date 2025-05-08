@@ -35,7 +35,7 @@ def generate_executive_summary(TOPIC, START_DATE, END_DATE, SAVE_PATH):
     try:
         with open(os.path.join(SAVE_PATH, 'sentiment_breakdown.json'), 'r') as f:
             data['sentiment_counts'] = json.load(f)
-        print("Loaded sentiment breakdown data")
+       
     except Exception as e:
         print(f"Error loading sentiment breakdown: {e}")
         data['sentiment_counts'] = {}
@@ -44,7 +44,7 @@ def generate_executive_summary(TOPIC, START_DATE, END_DATE, SAVE_PATH):
     try:
         with open(os.path.join(SAVE_PATH, 'sentiment_by_categories.json'), 'r') as f:
             data['pivot_sentiment'] = json.load(f)
-        print("Loaded sentiment by categories data")
+  
     except Exception as e:
         print(f"Error loading sentiment by categories: {e}")
         data['pivot_sentiment'] = []
@@ -53,7 +53,7 @@ def generate_executive_summary(TOPIC, START_DATE, END_DATE, SAVE_PATH):
     try:
         with open(os.path.join(SAVE_PATH, 'presence_score_analysis.json'), 'r') as f:
             data['presence_score_analysis'] = json.load(f)
-        print("Loaded presence score analysis")
+       
     except Exception as e:
         print(f"Error loading presence score analysis: {e}")
         data['presence_score_analysis'] = {}
@@ -62,7 +62,7 @@ def generate_executive_summary(TOPIC, START_DATE, END_DATE, SAVE_PATH):
     try:
         with open(os.path.join(SAVE_PATH, 'sentiment_analysis.json'), 'r') as f:
             data['sentiment_analysis'] = json.load(f)
-        print("Loaded sentiment analysis")
+        
     except Exception as e:
         print(f"Error loading sentiment analysis: {e}")
         data['sentiment_analysis'] = {}
@@ -70,7 +70,7 @@ def generate_executive_summary(TOPIC, START_DATE, END_DATE, SAVE_PATH):
     # 5. Load popular_mentions.csv
     try:
         data['popular_mentions'] = pd.read_csv(os.path.join(SAVE_PATH, 'popular_mentions.csv')).to_dict(orient='records')[:5]  # Limit to top 5
-        print("Loaded popular mentions data")
+  
     except Exception as e:
         print(f"Error loading popular mentions: {e}")
         data['popular_mentions'] = []
@@ -82,7 +82,7 @@ def generate_executive_summary(TOPIC, START_DATE, END_DATE, SAVE_PATH):
             for line in f:
                 kol_data.append(json.loads(line.strip()))
         data['kol_data'] = kol_data[:5]  # Limit to top 5
-        print("Loaded KOL data")
+     
     except Exception as e:
         print(f"Error loading KOL data: {e}")
         data['kol_data'] = []
@@ -94,7 +94,7 @@ def generate_executive_summary(TOPIC, START_DATE, END_DATE, SAVE_PATH):
             for line in f:
                 topic_data.append(json.loads(line.strip()))
         data['top_entities'] = topic_data[:10]  # Limit to top 10
-        print("Loaded topic overview data")
+     
     except Exception as e:
         print(f"Error loading topic overview: {e}")
         data['top_entities'] = []
@@ -103,7 +103,7 @@ def generate_executive_summary(TOPIC, START_DATE, END_DATE, SAVE_PATH):
     try:
         with open(os.path.join(SAVE_PATH, 'recommendations.json'), 'r') as f:
             data['recommendations'] = json.load(f)
-        print("Loaded recommendations data")
+   
     except Exception as e:
         print(f"Error loading recommendations: {e}")
         data['recommendations'] = []
@@ -268,8 +268,6 @@ def generate_executive_summary(TOPIC, START_DATE, END_DATE, SAVE_PATH):
     IMPORTANT: Ensure your output is ONLY the properly formatted JSON with no additional text, markdown, or explanatory content.
     """
     
-    print("Prompt generated, calling LLM...")
-    
     try:
         # Call LLM to generate executive summary
         summary_text = call_gemini(prompt)
@@ -319,7 +317,6 @@ def generate_executive_summary(TOPIC, START_DATE, END_DATE, SAVE_PATH):
         with open(os.path.join(SAVE_PATH, 'executive_summary.json'), 'w') as f:
             json.dump(summary, f, indent=2)
             
-        print(f"Executive summary generated and saved to {os.path.join(SAVE_PATH, 'executive_summary.json')}")
         return summary
         
     except Exception as e:
@@ -331,7 +328,8 @@ def generate_executive_summary(TOPIC, START_DATE, END_DATE, SAVE_PATH):
             "summary": {
                 "overview": "Unable to generate summary due to an error in processing.",
                 "error": str(e)
-            }
+            },
+            "output": str(summary_text)
         }
         
         with open(os.path.join(SAVE_PATH, 'executive_summary_error.json'), 'w') as f:

@@ -7,8 +7,6 @@ BACKGROUND_PATH = "./materials/cover.png"
 SOURCE = None
 
 def slide_cover(prs, TOPIC, RANGE_DATE, SAVE_FILE):
-
-    print(f'> Generate Cover for: {TOPIC}\nfrom {RANGE_DATE}')
     # === INISIALISASI SLIDE ===
     prs.slide_width = Cm(33.867)
     prs.slide_height = Cm(19.05)
@@ -32,11 +30,9 @@ def slide_cover(prs, TOPIC, RANGE_DATE, SAVE_FILE):
     add_text(slide, "AI-powered real-time media monitoring platform", 1.07, 14.8, 15, 1, "Calibri", 10.5, bold=True, color=(102, 102, 102))
     add_text(slide, f"© Moskal {datetime.now().year}, All rights reserved.", 1.07, 16.42, 14.2, 1, "Aptos Display", 8, bold=True, color=(140, 140, 140))
 
-    print('------- Saved!!!')
     
 def slide_summary_mentions(prs, TOPIC, RANGE_DATE, SAVE_FILE, page_number = 2, SOURCE = SOURCE):
-    print('> Slide Summary of Mentions')
-    
+
     slide = prs.slides.add_slide(prs.slide_layouts[6])  # Blank slide
 
     # Tambahkan template untuk halaman ke-2
@@ -101,10 +97,9 @@ def slide_summary_mentions(prs, TOPIC, RANGE_DATE, SAVE_FILE, page_number = 2, S
     slide.shapes.add_picture(os.path.join(SOURCE,"Volume of mentions_trend.png"), Cm(1), Cm(10.3), width=Cm(32.22),height = Cm(7.94))
 
 
-    print('------- Saved!!!')
     
 def slide_reach_trend(prs, TOPIC, RANGE_DATE, SAVE_FILE, page_number = 3, SOURCE = SOURCE):
-    print('> Generate Reach Trend')
+
     # Add slide
     slide = prs.slides.add_slide(prs.slide_layouts[6])
 
@@ -144,10 +139,10 @@ def slide_reach_trend(prs, TOPIC, RANGE_DATE, SAVE_FILE, page_number = 3, SOURCE
     slide.shapes.add_picture(os.path.join(SOURCE, "Non social media reach_trend.png"),
                              Cm(1), Cm(12.14), width=Cm(31.2),height = Cm(6.49))
 
-    print('------- Saved!!!')
+    
     
 def slide_sentiment_trend(prs, TOPIC, RANGE_DATE, SAVE_FILE, page_number = 4, SOURCE = SOURCE):
-    print('> Generate Sentiment Trend')
+ 
     # Add slide
     slide = prs.slides.add_slide(prs.slide_layouts[6])
 
@@ -186,10 +181,10 @@ def slide_sentiment_trend(prs, TOPIC, RANGE_DATE, SAVE_FILE, page_number = 4, SO
     slide.shapes.add_picture(os.path.join(SOURCE,"Negative_trend.png"),
                              Cm(1), Cm(12.14), width=Cm(31.2),height = Cm(6.49))
 
-    print('------- Saved!!!')
+    
       
 def slide_topic_overview(prs, TOPIC, RANGE_DATE, SAVE_FILE, page_number = 5, SOURCE = SOURCE):
-    print('> Generate topic overview')
+ 
     #read data
     data_topics = []
     with open(os.path.join(SOURCE,'topic_overview.json')) as f:
@@ -453,10 +448,10 @@ def slide_topic_overview(prs, TOPIC, RANGE_DATE, SAVE_FILE, page_number = 5, SOU
                         text_icon_run.font.size = Pt(8)
                         text_icon_run.hyperlink.address = link
 
-    print('------- Saved!!!')
+    
     
 def create_kol(prs,DATA, TOPIC, RANGE_DATE, SAVE_FILE, page_number, title = 'Top 10 Key Opinion Leaders (1/2)' ):
-    print("> Generate",title)
+  
     slide = prs.slides.add_slide(prs.slide_layouts[6])  # Blank slide
 
     add_slide_template(
@@ -599,7 +594,7 @@ def create_kol(prs,DATA, TOPIC, RANGE_DATE, SAVE_FILE, page_number, title = 'Top
                         run.font.size = Pt(12)
                         run.font.color.rgb = RGBColor(0, 112, 192)  # Blue
                         platform = lines[2].lower()
-                        print(platform)
+                    
                         if 'instagram' in platform:
                             link_user = f'https://www.instagram.com/{lines[0].strip("@ ")}/'
                         elif 'twitter' in platform:
@@ -610,7 +605,7 @@ def create_kol(prs,DATA, TOPIC, RANGE_DATE, SAVE_FILE, page_number, title = 'Top
                             link_user = f'https://www.youtube.com/{lines[0]}/'
                         else:
                             link_user = f'https://{platform}'
-                        print(link_user)
+                    
                         run.hyperlink.address = link_user
 
             # Special formatting for sentiment column
@@ -663,7 +658,7 @@ def create_kol(prs,DATA, TOPIC, RANGE_DATE, SAVE_FILE, page_number, title = 'Top
             else:
                 p.alignment = PP_ALIGN.LEFT
 
-    print('------- Saved!!!')
+    
 
 def slide_kol(prs, TOPIC, RANGE_DATE, SAVE_FILE, page_number = 3, SOURCE = SOURCE):
     data_kol = []
@@ -677,7 +672,7 @@ def slide_kol(prs, TOPIC, RANGE_DATE, SAVE_FILE, page_number = 3, SOURCE = SOURC
                SAVE_FILE,page_number+1, 'Top 10 Key Opinion Leaders (2/2)')
     
 def slide_presence_score(prs, TOPIC, RANGE_DATE, SAVE_FILE, page_number = 3, SOURCE = SOURCE):
-    print("> Generate Presence Score")
+ 
     with open(os.path.join(SOURCE,'presence_score_analysis.json')) as f:
         data_analysis = json.load(f)
     
@@ -748,10 +743,9 @@ def slide_presence_score(prs, TOPIC, RANGE_DATE, SAVE_FILE, page_number = 3, SOU
     slide.shapes.add_picture(quote_left_path, Cm(1.67), Cm(11.95),width=Cm(0.66), height=Cm(0.47))
     slide.shapes.add_picture(quote_right_path, Cm(31.7), Cm(17.86), width=Cm(0.66), height=Cm(0.47))
 
-    print('------- Saved!!!')
+    
     
 def slide_sentiment_analysis(prs, TOPIC, RANGE_DATE, SAVE_FILE, page_number = 3, SOURCE = SOURCE):
-    print("> Generate Sentiment Analysis")
     
     with open(os.path.join(SOURCE,'sentiment_analysis.json')) as f:
         data_analysis = json.load(f)
@@ -846,10 +840,9 @@ def slide_sentiment_analysis(prs, TOPIC, RANGE_DATE, SAVE_FILE, page_number = 3,
 
     # ---------- Simpan ----------
 
-    print('------- Saved!!!')
+    
     
 def slide_sentiment_context(prs, TOPIC, RANGE_DATE, SAVE_FILE, page_number = 3, SOURCE = SOURCE):
-    print("> Generate Sentiment Context")
     # Load file PPT yang sudah ada
     slide = prs.slides.add_slide(prs.slide_layouts[6])
     
@@ -915,10 +908,10 @@ def slide_sentiment_context(prs, TOPIC, RANGE_DATE, SAVE_FILE, page_number = 3, 
 
 
 
-    print('------- Saved!!!')
+    
 
 def slide_popular_mentions(prs, TOPIC, RANGE_DATE, SAVE_FILE, page_number = 3, SOURCE = SOURCE):
-    print("> Generate Popular Mentions")
+
     popular_mentions = pd.read_csv(os.path.join(SOURCE,'popular_mentions.csv'))
     slide = prs.slides.add_slide(prs.slide_layouts[6])  # Blank slide
     
@@ -1024,10 +1017,9 @@ def slide_popular_mentions(prs, TOPIC, RANGE_DATE, SAVE_FILE, page_number = 3, S
                         width_date, height_date, 
                         Pt(11), "Arial",RGBColor(0, 0, 0), False, url = i['link_post'])    
 
-    print('------- Saved!!!')
+    
 
 def slide_recommendations(prs, TOPIC, RANGE_DATE, SAVE_FILE, page_number = 3, SOURCE = SOURCE):
-    print("> Generate Recommendations")
     with open(os.path.join(SOURCE,'recommendations.json')) as f:
         recommendations = json.load(f)
             
@@ -1094,29 +1086,9 @@ def slide_recommendations(prs, TOPIC, RANGE_DATE, SAVE_FILE, page_number = 3, SO
         action_p = text_frame.add_paragraph()
         
     prs.save(SAVE_FILE)
-    print('------- Saved!!!')
+    
 
 def slide_executive_summary(prs, TOPIC, RANGE_DATE, SAVE_FILE, page_number=2, SOURCE=SOURCE):
-    """
-    Creates an executive summary slide using the JSON format from the executive_summary.json file.
-    
-    Parameters:
-    -----------
-    prs : PowerPoint presentation object
-        The presentation to add the slide to
-    TOPIC : str
-        Main topic of the presentation
-    RANGE_DATE : str
-        Date range for the analysis
-    SAVE_FILE : str
-        Path to save the PowerPoint file
-    page_number : int, optional
-        The page number for this slide (default: 2)
-    SOURCE : str
-        Directory path where the executive_summary.json file is located
-    """
-    print("> Generate Executive Summary")
-    
     try:
         # Load the executive summary JSON file
         with open(os.path.join(SOURCE, 'executive_summary.json')) as f:
@@ -1144,7 +1116,7 @@ def slide_executive_summary(prs, TOPIC, RANGE_DATE, SAVE_FILE, page_number=2, SO
         line_title(slide, Cm(1.23), Cm(2.63), Cm(4), Cm(0.07))
 
         # Create text box for content
-        content_box = slide.shapes.add_textbox(Cm(1), Cm(3), Cm(30.93), Cm(13))
+        content_box = slide.shapes.add_textbox(Cm(1), Cm(2.11), Cm(30.93), Cm(13))
         text_frame = content_box.text_frame
         text_frame.word_wrap = True
         
@@ -1169,7 +1141,7 @@ def slide_executive_summary(prs, TOPIC, RANGE_DATE, SAVE_FILE, page_number=2, SO
             
             # Add topics if provided
             if topics_list:
-                for topic in topics_list:
+                for topic in topics_list[:3]:
                     # Topic name and stats
                     topic_p = text_frame.add_paragraph()
                     topic_name = topic.get("name", "")
@@ -1242,7 +1214,7 @@ def slide_executive_summary(prs, TOPIC, RANGE_DATE, SAVE_FILE, page_number=2, SO
         
         # Save the presentation
         prs.save(SAVE_FILE)
-        print('------- Saved!!!')
+        
         
     except Exception as e:
         print(f"Error generating executive summary slide: {e}")
@@ -1266,7 +1238,7 @@ def slide_executive_summary(prs, TOPIC, RANGE_DATE, SAVE_FILE, page_number=2, SO
         line_title(slide, Cm(1.23), Cm(2.63), Cm(4), Cm(0.07))
 
         # Create text box for error message
-        content_box = slide.shapes.add_textbox(Cm(1), Cm(3), Cm(30.93), Cm(13))
+        content_box = slide.shapes.add_textbox(Cm(1), Cm(2.11), Cm(30.93), Cm(13))
         text_frame = content_box.text_frame
         text_frame.word_wrap = True
         
@@ -1277,4 +1249,3 @@ def slide_executive_summary(prs, TOPIC, RANGE_DATE, SAVE_FILE, page_number=2, SO
         
         # Save the presentation
         prs.save(SAVE_FILE)
-        print('------- Saved with error message!!!')

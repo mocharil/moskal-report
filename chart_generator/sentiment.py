@@ -43,9 +43,6 @@ def plot_half_donut_sentiment(sentiment_counts, colors=None, title=None, save_pa
         )
         current_angle += angle
 
-    # Legend
-    import matplotlib.lines as mlines
-
     # Legend Labels & Color-Coded Dots
     legend_labels = [f"{label} ({sentiment_counts[label]})" for label in labels]
     handles = [
@@ -65,7 +62,7 @@ def plot_half_donut_sentiment(sentiment_counts, colors=None, title=None, save_pa
         frameon=False
     )
     plt.tight_layout()
-    plt.savefig(save_path, dpi=300, bbox_inches='tight',transparent=True)
+    plt.savefig(save_path, dpi=75, bbox_inches='tight',transparent=True)
  
 def plot_sentiment_by_channel(df, title="Sentiment Breakdown per Channel", save_path=None):
     df = df.sort_values(by='total_mentions', ascending=False).reset_index(drop=True)
@@ -131,10 +128,9 @@ def plot_sentiment_by_channel(df, title="Sentiment Breakdown per Channel", save_
     plt.tight_layout()
     
     if save_path:
-        plt.savefig(save_path, dpi=300, bbox_inches='tight', transparent=True)
+        plt.savefig(save_path, dpi=75, bbox_inches='tight', transparent=True)
 
 def get_sentiment_posts(KEYWORDS, START_DATE, END_DATE, limit=50):
-
     
     # Definisikan channel dan indeks
     default_channels = ['reddit', 'youtube', 'linkedin', 'twitter', 

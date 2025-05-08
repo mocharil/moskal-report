@@ -1,5 +1,6 @@
-from utils.functions import About_BQ
 from utils.gemini import call_gemini
+import matplotlib
+matplotlib.use('Agg') 
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
